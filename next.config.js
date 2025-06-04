@@ -12,6 +12,7 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  assetPrefix: './',
   webpack: (config, { isServer }) => {
     // Only include serialport in Node.js environment
     if (!isServer) {

@@ -12,6 +12,13 @@ body {
   font-family: system-ui, -apple-system, sans-serif;
 }
 
+.fixed-size-vertical-div {
+  width: 100px; /* Set a fixed width (optional, but often needed) */
+  height: 20px; /* Set a fixed height */
+  /* display: block; div is block by default, which makes it stack vertically */
+  /* other styles like background-color, border, etc. */
+}
+
 /* Custom styles for the sidebar */
 .sidebar {
   background-color: #111827;
@@ -62,6 +69,43 @@ body {
   margin-right: 0.5rem;
   width: 1rem;
   height: 1rem;
+}
+
+/* Tab styles */
+/* In your globals.css */
+.tab {
+  /* Basic button reset */
+  appearance: none;
+  border: none;
+  /* Layout and alignment */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Padding and rounding */
+  padding: 0.375rem 0.75rem; /* Smaller size */
+  border-radius: 0.5rem;
+  /* Text styles */
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #9ca3af; /* Gray text for inactive */
+  /* Background */
+  background-color: #111827; /* Dark background for inactive (bg-gray-900) */
+  /* Transitions */
+  transition-property: all;
+  transition-duration: 200ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+}
+
+.tab:hover {
+  background-color: rgba(234, 179, 8, 0.1);
+  color: #facc15;
+}
+
+.tab.active {
+  background-color: rgba(234, 179, 8, 0.2);
+  color: #facc15;
+  box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow); /* shadow-sm */
 }
 
 /* Button styles */
