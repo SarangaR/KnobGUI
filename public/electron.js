@@ -110,7 +110,7 @@ function createWindow() {
           },
         },
         {
-          label: "Connect",
+          label: "Auto-connect",
           accelerator: "CmdOrCtrl+Shift+C",
           click: () => {
             mainWindow.webContents.send("connect-device")
@@ -126,7 +126,7 @@ function createWindow() {
         { type: "separator" },
         {
           label: "Reset Device",
-          accelerator: "CmdOrCtrl+Shift+R",
+          accelerator: "CmdOrCtrl+Shift+X",
           click: () => {
             mainWindow.webContents.send("reset-device")
           },
@@ -162,13 +162,13 @@ function createWindow() {
       label: "Help",
       submenu: [
         {
-          label: "About Haptic Knob Control",
+          label: "About Mini TFD Control",
           click: () => {
             dialog.showMessageBox(mainWindow, {
               type: "info",
               title: "About",
-              message: "Haptic Knob Control",
-              detail: "Version 0.1.0\nA desktop application for controlling haptic knob devices.",
+              message: "Mini TFD Control",
+              detail: "Version 0.1.0\nA desktop application for controlling mini TFD devices.",
               buttons: ["OK"],
             })
           },

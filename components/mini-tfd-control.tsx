@@ -14,8 +14,25 @@ import {
   ArrowRightCircle,
   ArrowLeftCircle,
   Gauge,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
+
+// Constants for product ID persistence
+const DEFAULT_PRODUCT_ID = "1002";
+const LAST_PRODUCT_ID_KEY = "lastConnectedProductId";
+
+// Helper functions for product ID persistence
+const getLastProductId = (): string => {
+  if (typeof window === 'undefined') return DEFAULT_PRODUCT_ID;
+  return localStorage.getItem(LAST_PRODUCT_ID_KEY) || DEFAULT_PRODUCT_ID;
+};
+
+const setLastProductId = (productId: string) => {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(LAST_PRODUCT_ID_KEY, productId);
+};
 
 type HapticMode =
   | "none"
@@ -100,6 +117,34 @@ declare global {
   }
 }
 
+// Add CollapsibleSection component before MiniTFDControl
+interface CollapsibleSectionProps {
+  title: string
+  children: React.ReactNode
+  defaultExpanded?: boolean
+}
+
+function CollapsibleSection({ title, children, defaultExpanded = true }: CollapsibleSectionProps) {
+  const [isExpanded, setIsExpanded] = useState(defaultExpanded)
+
+  return (
+    <div className="sidebar-group">
+      <div 
+        className={`sidebar-group-label ${!isExpanded ? 'collapsed' : ''}`}
+        onClick={() => setIsExpanded(!isExpanded)}
+      >
+        <span>{title}</span>
+        <ChevronDown size={16} className="text-gray-400" />
+      </div>
+      <div className={`collapsible-content ${isExpanded ? 'expanded' : 'collapsed'}`}>
+        <div className="p-1 space-y-2">
+          {children}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function MiniTFDControl() {
   // State
   const [state, setState] = useState<TFDState>({
@@ -113,7 +158,7 @@ export function MiniTFDControl() {
     selectedPort: "",
     baudRate: 115200,
     isPolling: true,
-    pollInterval: 30,
+    pollInterval: 10,
     endstopTurns: 2.5,
     endstopMinAngle: -450,
     endstopMaxAngle: 450,
@@ -228,15 +273,15 @@ export function MiniTFDControl() {
       setError("Serial communication not available in browser for auto-connect");
       return;
     }
-    if (isAutoConnecting) return; // Prevent multiple auto-connect attempts
+    if (isAutoConnecting) return;
     if (isConnected) {
       await disconnect();
     }
 
     setIsAutoConnecting(true);
     setError(null);
-    setAvailablePorts([]); // Clear previous port list
-    updateState({ selectedPort: "" }); // Clear selected port
+    setAvailablePorts([]);
+    updateState({ selectedPort: "" });
 
     console.log("Starting auto-connect...");
 
@@ -258,14 +303,26 @@ export function MiniTFDControl() {
         return;
       }
 
-      // Select the first port with a valid productID
-      const selectedPort = filteredPorts[0];
-      console.log(`Auto-selecting port: ${selectedPort.path} (Product ID: ${selectedPort.productId})`);
-      updateState({ selectedPort: selectedPort.path });
-      
-      // Connect to the selected port
-      await connect(selectedPort.path, state.baudRate);
-      setIsAutoConnecting(false);
+      // Get the last connected productID
+      const lastProductId = getLastProductId();
+      console.log(`Looking for port with Product ID: ${lastProductId}`);
+
+      // Try to find a port matching the last productID first
+      const preferredPort = filteredPorts.find(port => port.productId === lastProductId);
+
+      if (preferredPort) {
+        console.log(`Found preferred port: ${preferredPort.path} (Product ID: ${preferredPort.productId})`);
+        updateState({ selectedPort: preferredPort.path });
+        
+        // Connect to the preferred port
+        await connect(preferredPort.path, state.baudRate);
+        setIsAutoConnecting(false);
+
+      } else {
+        console.log(`Preferred port with Product ID ${lastProductId} not found.`);
+        // Do not connect, allow manual connection
+        setIsAutoConnecting(false);
+      }
 
     } catch (err) {
       console.error("Auto-connect process failed:", err);
@@ -284,9 +341,16 @@ export function MiniTFDControl() {
       return
     }
 
+    // Find and store the productID of the port we're connecting to
+    const port = availablePorts.find(p => p.path === targetPort);
+    if (port?.productId) {
+      setLastProductId(port.productId);
+      console.log(`Storing product ID: ${port.productId}`);
+    }
+
     setIsConnecting(true);
     setError(null);
-    setIsDeviceResponding(false); // Set to false initially
+    setIsDeviceResponding(false);
     // Clear any existing device response timeout when starting a new connection attempt
     if (deviceResponseTimeoutRef.current) {
       clearTimeout(deviceResponseTimeoutRef.current);
@@ -636,7 +700,7 @@ export function MiniTFDControl() {
 
     if (isElectron && window.electronAPI) {
       const handleScanPorts = () => listAvailablePorts()
-      const handleConnectDevice = () => !isConnected && connect()
+      const handleConnectDevice = () => !isConnected && handleAutoConnect()
       const handleDisconnectDevice = () => isConnected && disconnect()
       const handleResetDevice = () => isConnected && reset()
       const handleCalibrateDevice = () => isConnected && calibrate()
@@ -778,7 +842,7 @@ export function MiniTFDControl() {
   // Handle mode change
   const handleModeChange = (newMode: HapticMode) => {
     // Update stiffness based on mode
-    const newStiffness = newMode === "inertial-control" ? 0.05 : 
+    const newStiffness = newMode === "inertial-control" ? 0.3 : 
                         newMode === "proportional-control" ? 0.8 : 
                         state.stiffness;
     
@@ -810,13 +874,13 @@ export function MiniTFDControl() {
               />
               <span className="text-xs text-gray-400">
                 {!isConnected ? "Disconnected" : !isDeviceResponding ? "Device not responding" : "Connected"}
-                {isElectron ? " (Electron)" : " (Browser)"}
+                {isElectron ? "" : " (Browser)"}
               </span>
             </div>
             
             <div className="fixed-size-vertical-div"></div>
 
-            {/* Custom Device Type Tabs - MOVED BACK HERE with margin top */}
+            {/* Custom Device Type Tabs */}
             <div className="mt-4 flex bg-gray-800 rounded-lg p-1 gap-1">
               <button
                 className={`tab ${
@@ -843,204 +907,191 @@ export function MiniTFDControl() {
             </div>
           </div>
 
-          {/* Rest of sidebar content stays the same */}
           {/* Modes */}
-          <div className="sidebar-group">
-            <div className="sidebar-group-label">Modes</div>
-            <div>
-              {availableModes.map((mode) => {
-                const Icon = mode.icon
-                return (
-                  <div
-                    key={mode.id}
-                    className={`sidebar-menu-item ${state.mode === mode.id ? "active" : ""}`}
-                    onClick={() => handleModeSelect(mode.id as HapticMode)}
-                    style={{ fontSize: "0.92rem", padding: "0.35rem 0.5rem" }}
-                  >
-                    <Icon size={15} />
-                    <span>{mode.label}</span>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
+          <CollapsibleSection title="Modes">
+            {availableModes.map((mode) => {
+              const Icon = mode.icon
+              return (
+                <div
+                  key={mode.id}
+                  className={`sidebar-menu-item ${state.mode === mode.id ? "active" : ""}`}
+                  onClick={() => handleModeSelect(mode.id as HapticMode)}
+                  style={{ fontSize: "0.92rem", padding: "0.35rem 0.5rem" }}
+                >
+                  <Icon size={15} />
+                  <span>{mode.label}</span>
+                </div>
+              )
+            })}
+          </CollapsibleSection>
 
           {/* Connection section */}
-          <div className="sidebar-group">
-            <div className="sidebar-group-label">Connection</div>
-            <div className="p-1 space-y-2">
-              {/* Manual port selection */}
-              <div className="flex space-x-1">
-                <select
-                  className="form-select flex-1 min-w-0 text-xs px-1 py-1"
-                  value={state.selectedPort}
-                  onChange={(e) => updateState({ selectedPort: e.target.value })}
-                  style={{ fontSize: "0.85rem" }}
-                  disabled={isAutoConnecting} // Disable while auto-connecting
-                >
-                  <option value="">Select port...</option>
-                  {availablePorts.map((port) => (
-                    <option key={port.path} value={port.path}>
-                      {port.friendlyName || port.manufacturer || port.path}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  className="btn btn-outline btn-sm"
-                  onClick={listAvailablePorts} // Keep manual scan button
-                  disabled={isScanning || isAutoConnecting} // Disable while scanning or auto-connecting
-                  style={{ minWidth: 28, padding: 0 }}
-                >
-                  <RefreshCw size={12} className={isScanning ? "animate-spin" : ""} />
-                </button>
-              </div>
-
+          <CollapsibleSection title="Connection">
+            {/* Manual port selection */}
+            <div className="flex space-x-1">
               <select
-                className="form-select text-xs px-1 py-1"
-                value={state.baudRate.toString()}
-                onChange={(e) => updateState({ baudRate: Number.parseInt(e.target.value) })}
+                className="form-select flex-1 min-w-0 text-xs px-1 py-1"
+                value={state.selectedPort}
+                onChange={(e) => updateState({ selectedPort: e.target.value })}
                 style={{ fontSize: "0.85rem" }}
-                disabled={isAutoConnecting} // Disable while auto-connecting
+                disabled={isAutoConnecting}
               >
-                {baudRates.map((rate) => (
-                  <option key={rate} value={rate.toString()}>
-                    {rate} baud
+                <option value="">Select port...</option>
+                {availablePorts.map((port) => (
+                  <option key={port.path} value={port.path}>
+                    {port.friendlyName || port.manufacturer || port.path}
                   </option>
                 ))}
               </select>
-
-              {/* Manual Connect/Disconnect button */}
               <button
-                className={`btn ${isConnected ? "btn-outline" : "btn-primary"} w-full btn-sm`}
-                onClick={handleConnect} // Keep manual connect button
-                disabled={!state.selectedPort || isConnecting || isAutoConnecting} // Disable while auto-connecting
-                style={{ fontSize: "0.9rem", padding: "0.4rem 0" }}
+                className="btn btn-outline btn-sm"
+                onClick={listAvailablePorts}
+                disabled={isScanning || isAutoConnecting}
+                style={{ minWidth: 28, padding: 0 }}
               >
-                {isConnecting ? (
-                  "Connecting..."
-                ) : isConnected ? (
-                  <>
-                    <WifiOff size={13} className="mr-2" />
-                    Disconnect
-                  </>
-                ) : (
-                  <>
-                    <Wifi size={13} className="mr-2" />
-                    Connect
-                  </>
-                )}
+                <RefreshCw size={12} className={isScanning ? "animate-spin" : ""} />
               </button>
-              
-              {/* New Auto-connect button */}
-              <button
-                  className="btn btn-outline w-full btn-sm"
-                  onClick={handleAutoConnect}
-                  disabled={isScanning || isConnecting || isAutoConnecting} // Disable while busy
-                  style={{ fontSize: "0.9rem", padding: "0.4rem 0" }}
-              >
-                  {isAutoConnecting ? (
-                    "Auto-connecting..."
-                  ) : (
-                    <>
-                      <Wifi size={13} className="mr-2" />
-                      Auto-connect
-                    </>
-                  )}
-              </button>
+            </div>
 
-              {error && (
-                <div className="bg-red-900/30 border border-red-800 p-1 rounded text-xs text-red-400">{error}</div>
+            <select
+              className="form-select text-xs px-1 py-1"
+              value={state.baudRate.toString()}
+              onChange={(e) => updateState({ baudRate: Number.parseInt(e.target.value) })}
+              style={{ fontSize: "0.85rem" }}
+              disabled={isAutoConnecting}
+            >
+              {baudRates.map((rate) => (
+                <option key={rate} value={rate.toString()}>
+                  {rate} baud
+                </option>
+              ))}
+            </select>
+
+            {/* Manual Connect/Disconnect button */}
+            <button
+              className={`btn ${isConnected ? "btn-outline" : "btn-primary"} w-full btn-sm`}
+              onClick={handleConnect}
+              disabled={!state.selectedPort || isConnecting || isAutoConnecting}
+              style={{ fontSize: "0.9rem", padding: "0.4rem 0" }}
+            >
+              {isConnecting ? (
+                "Connecting..."
+              ) : isConnected ? (
+                <>
+                  <WifiOff size={13} className="mr-2" />
+                  Disconnect
+                </>
+              ) : (
+                <>
+                  <Wifi size={13} className="mr-2" />
+                  Connect
+                </>
               )}
-            </div>
-          </div>
+            </button>
+            
+            {/* Auto-connect button */}
+            <button
+              className="btn btn-outline w-full btn-sm"
+              onClick={handleAutoConnect}
+              disabled={isScanning || isConnecting || isAutoConnecting}
+              style={{ fontSize: "0.9rem", padding: "0.4rem 0" }}
+            >
+              {isAutoConnecting ? (
+                "Auto-connecting..."
+              ) : (
+                <>
+                  <Wifi size={13} className="mr-2" />
+                  Auto-connect
+                </>
+              )}
+            </button>
 
-          {/* Monitoring section stays exactly the same */}
-          <div className="sidebar-group">
-            <div className="sidebar-group-label">Monitoring</div>
-            <div className="p-1 space-y-2">
-              <div className="form-control mb-2">
-                <label className="form-label">Current Angle (°)</label>
-                <div
-                  className="form-input bg-gray-800 text-yellow-400 font-mono text-center text-base px-1 py-1"
-                  style={{ fontSize: "1rem", width: "100%", minWidth: 0, padding: "0.3rem 0.2rem" }}
-                >
-                  {state.currentAngle.toFixed(1)}°
-                </div>
-              </div>
+            {error && (
+              <div className="bg-red-900/30 border border-red-800 p-1 rounded text-xs text-red-400">{error}</div>
+            )}
+          </CollapsibleSection>
 
-              {/* Display for Velocity */}
-              <div className="form-control mb-2">
-                <label className="form-label">Velocity (°/s)</label>
-                <div
-                  className="form-input bg-gray-800 text-blue-400 font-mono text-center text-base px-1 py-1"
-                  style={{ fontSize: "1rem", width: "100%", minWidth: 0, padding: "0.3rem 0.2rem" }}
-                >
-                  {state.currentVelocity.toFixed(1)}°/s
-                </div>
-              </div>
-
-              {/* New Display for Torque */}
-              <div className="form-control mb-2">
-                <label className="form-label">Torque (Nm)</label>
-                <div
-                  className="form-input bg-gray-800 text-purple-400 font-mono text-center text-base px-1 py-1"
-                  style={{ fontSize: "1rem", width: "100%", minWidth: 0, padding: "0.3rem 0.2rem" }}
-                >
-                   {/* Scale torque from device value to 0-1 display */}
-                   {(state.currentTorque).toFixed(2)} Nm
-                </div>
-              </div>
-
-              <div className="flex items-center space-x-2 mb-2">
-                <input
-                  type="checkbox"
-                  id="polling"
-                  checked={state.isPolling}
-                  onChange={(e) => updateState({ isPolling: e.target.checked })}
-                  className="w-4 h-4"
-                />
-                <label htmlFor="polling" className="form-label mb-0">
-                  Auto-poll angle
-                </label>
-              </div>
-
-              <div className="form-control mb-2">
-                <label className="form-label">Poll Interval (ms)</label>
-                <input
-                  type="number"
-                  className="form-input text-xs px-1 py-1"
-                  min="50"
-                  max="5000"
-                  step="50"
-                  value={state.pollInterval}
-                  onChange={(e) => updateState({ pollInterval: Number.parseInt(e.target.value) || 100 })}
-                  disabled={!state.isPolling}
-                  style={{ fontSize: "0.9rem", width: "100%", minWidth: 0, padding: "0.2rem 0.2rem" }}
-                />
-              </div>
-
-              <div className="flex space-x-1">
-                <button
-                  className="btn btn-outline btn-sm flex-1"
-                  onClick={requestCurrentAngle}
-                  disabled={!isConnected}
-                  style={{ fontSize: "0.85rem", padding: "0.2rem 0" }}
-                >
-                  <Target size={11} className="mr-1" />
-                  Angle
-                </button>
-                <button
-                  className="btn btn-outline btn-sm flex-1"
-                  onClick={requestCurrentVelocity}
-                  disabled={!isConnected}
-                  style={{ fontSize: "0.85rem", padding: "0.2rem 0" }}
-                >
-                  <Zap size={11} className="mr-1" />
-                  Velocity
-                </button>
+          {/* Monitoring section */}
+          <CollapsibleSection title="Monitoring">
+            <div className="form-control mb-2">
+              <label className="form-label">Current Angle (°)</label>
+              <div
+                className="form-input bg-gray-800 text-yellow-400 font-mono text-center text-base px-1 py-1"
+                style={{ fontSize: "1rem", width: "100%", minWidth: 0, padding: "0.3rem 0.2rem" }}
+              >
+                {state.currentAngle.toFixed(1)}°
               </div>
             </div>
-          </div>
+
+            <div className="form-control mb-2">
+              <label className="form-label">Velocity (RPM)</label>
+              <div
+                className="form-input bg-gray-800 text-blue-400 font-mono text-center text-base px-1 py-1"
+                style={{ fontSize: "1rem", width: "100%", minWidth: 0, padding: "0.3rem 0.2rem" }}
+              >
+                {state.currentVelocity.toFixed(1)} RPM
+              </div>
+            </div>
+
+            <div className="form-control mb-2">
+              <label className="form-label">Torque (Nm)</label>
+              <div
+                className="form-input bg-gray-800 text-purple-400 font-mono text-center text-base px-1 py-1"
+                style={{ fontSize: "1rem", width: "100%", minWidth: 0, padding: "0.3rem 0.2rem" }}
+              >
+                {(state.currentTorque).toFixed(2)} Nm
+              </div>
+            </div>
+
+            <div className="flex items-center space-x-2 mb-2">
+              <input
+                type="checkbox"
+                id="polling"
+                checked={state.isPolling}
+                onChange={(e) => updateState({ isPolling: e.target.checked })}
+                className="w-4 h-4"
+              />
+              <label htmlFor="polling" className="form-label mb-0">
+                Auto-poll angle
+              </label>
+            </div>
+
+            <div className="form-control mb-2">
+              <label className="form-label">Poll Interval (ms)</label>
+              <input
+                type="number"
+                className="form-input text-xs px-1 py-1"
+                min="50"
+                max="5000"
+                step="50"
+                value={state.pollInterval}
+                onChange={(e) => updateState({ pollInterval: Number.parseInt(e.target.value) || 100 })}
+                disabled={!state.isPolling}
+                style={{ fontSize: "0.9rem", width: "100%", minWidth: 0, padding: "0.2rem 0.2rem" }}
+              />
+            </div>
+
+            <div className="flex space-x-1">
+              <button
+                className="btn btn-outline btn-sm flex-1"
+                onClick={requestCurrentAngle}
+                disabled={!isConnected}
+                style={{ fontSize: "0.85rem", padding: "0.2rem 0" }}
+              >
+                <Target size={11} className="mr-1" />
+                Angle
+              </button>
+              <button
+                className="btn btn-outline btn-sm flex-1"
+                onClick={requestCurrentVelocity}
+                disabled={!isConnected}
+                style={{ fontSize: "0.85rem", padding: "0.2rem 0" }}
+              >
+                <Zap size={11} className="mr-1" />
+                Velocity
+              </button>
+            </div>
+          </CollapsibleSection>
         </div>
       </ScrollArea>
 
@@ -1764,6 +1815,16 @@ function VelocityDial({ velocity: torqueValue, isConnected, isDeviceResponding }
   const centerY = svgSize / 2;
   const radius = svgSize / 2 - 10;
 
+  // Define the start and end points for the needle, offset from the center
+  // Increased needleInnerRadius to prevent overlap with text
+  const needleInnerRadius = radius * 0.5; // Increased from 0.5 to 0.7
+  const needleOuterRadius = radius - 5;
+
+  const needleStartX = centerX + Math.cos(((pointerAngle - 90) * Math.PI) / 180) * needleInnerRadius;
+  const needleStartY = centerY + Math.sin(((pointerAngle - 90) * Math.PI) / 180) * needleInnerRadius;
+  const needleEndX = centerX + Math.cos(((pointerAngle - 90) * Math.PI) / 180) * needleOuterRadius;
+  const needleEndY = centerY + Math.sin(((pointerAngle - 90) * Math.PI) / 180) * needleOuterRadius;
+
   return (
     <svg
       width={svgSize}
@@ -1772,15 +1833,18 @@ function VelocityDial({ velocity: torqueValue, isConnected, isDeviceResponding }
       className="pointer-events-none"
       style={{ opacity: isConnected ? 1 : 0.5 }}
     >
+      {/* Outer circle */}
       <circle cx={centerX} cy={centerY} r={radius} fill="none" stroke={dialColor} strokeWidth="6" />
 
+      {/* Center circle */}
       <circle cx={centerX} cy={centerY} r="6" fill={dialColor} />
 
+      {/* Needle */}
       <line
-        x1={centerX}
-        y1={centerY}
-        x2={centerX + Math.cos(((pointerAngle - 90) * Math.PI) / 180) * (radius - 5)}
-        y2={centerY + Math.sin(((pointerAngle - 90) * Math.PI) / 180) * (radius - 5)}
+        x1={needleStartX} // Use the calculated start point
+        y1={needleStartY} // Use the calculated start point
+        x2={needleEndX} // Use the calculated end point
+        y2={needleEndY} // Use the calculated end point
         stroke={dialColor}
         strokeWidth="4"
         strokeLinecap="round"

@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "main": "public/electron.js",
+  "author": "Saranga Rajagopalan",
+  "description": "Mini TFD Control Software for knob and steering modes",
   "homepage": "./",
   "scripts": {
     "dev": "next dev",
@@ -93,7 +95,7 @@
     "wait-on": "^7.0.1"
   },
   "build": {
-    "appId": "com.yourcompany.mini-tfd-control",
+    "appId": "com.parker.mini-tfd-control",
     "productName": "Mini TFD Control",
     "directories": {
       "output": "dist"
@@ -120,7 +122,7 @@
           ]
         }
       ],
-      "icon": "public/icon.ico",
+      "icon": "public/icon.png",
       "requestedExecutionLevel": "asInvoker"
     },
     "mac": {

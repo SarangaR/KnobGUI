@@ -35,6 +35,7 @@ body {
 .sidebar-group {
   padding: 0.75rem;
   border-bottom: 1px solid #374151;
+  overflow: hidden; /* Ensure animations don't overflow */
 }
 
 .sidebar-group-label {
@@ -43,6 +44,24 @@ body {
   font-weight: 600;
   text-transform: uppercase;
   margin-bottom: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none; /* Prevent text selection when clicking */
+  transition: color 0.2s ease;
+}
+
+.sidebar-group-label:hover {
+  color: #facc15;
+}
+
+.sidebar-group-label svg {
+  transition: transform 0.2s ease;
+}
+
+.sidebar-group-label.collapsed svg {
+  transform: rotate(-90deg);
 }
 
 .sidebar-menu-item {
@@ -281,4 +300,20 @@ body {
 .sidebar {
   scrollbar-width: thin;
   scrollbar-color: #374151 #181e2a;
+}
+
+/* Collapsible section animations */
+.collapsible-content {
+  overflow: hidden;
+  transition: max-height 0.15s ease-out, opacity 0.15s ease-out;
+}
+
+.collapsible-content.collapsed {
+  max-height: 0;
+  opacity: 0;
+}
+
+.collapsible-content.expanded {
+  max-height: 1000px; /* Large enough to contain any section */
+  opacity: 1;
 }
