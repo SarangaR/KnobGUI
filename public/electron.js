@@ -299,7 +299,7 @@ ipcMain.handle("serial-connect", async (event, portPath, baudRate) => {
 
       global.serialParser.on("data", (data) => {
         const trimmedData = data.trim()
-        console.log("Received:", trimmedData)
+        // console.log("Received:", trimmedData)
         mainWindow.webContents.send("serial-data", trimmedData)
       })
 
@@ -354,7 +354,7 @@ ipcMain.handle("serial-disconnect", async () => {
 
 ipcMain.handle("serial-write", async (event, data) => {
   try {
-    console.log("Writing to serial port:", data.trim())
+    // console.log("Writing to serial port:", data.trim())
 
     if (global.serialPort && global.serialPort.isOpen) {
       await new Promise((resolve, reject) => {

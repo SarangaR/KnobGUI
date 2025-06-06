@@ -38,7 +38,7 @@ export class HapticSerialInterface {
     // Set up event handlers for Electron
     if (typeof window !== "undefined" && window.electronAPI) {
       electronSerial.onData((data: string) => {
-        console.log("Received:", data)
+        // console.log("Received:", data)
 
         if (this.onDataCallback) {
           this.onDataCallback(data)

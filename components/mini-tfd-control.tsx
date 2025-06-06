@@ -158,7 +158,7 @@ export function MiniTFDControl() {
     selectedPort: "",
     baudRate: 115200,
     isPolling: true,
-    pollInterval: 10,
+    pollInterval: 30,
     endstopTurns: 2.5,
     endstopMinAngle: -450,
     endstopMaxAngle: 450,
@@ -176,6 +176,13 @@ export function MiniTFDControl() {
   const [pendingAngleRequest, setPendingAngleRequest] = useState(false)
   const [pendingVelocityRequest, setPendingVelocityRequest] = useState(false)
   const [isDeviceResponding, setIsDeviceResponding] = useState(false)
+  // Update angle filter state with more sophisticated filtering
+  const [filteredAngle, setFilteredAngle] = useState<number>(0)
+  const angleHistoryRef = useRef<number[]>([])
+  const FILTER_WINDOW_SIZE = 3 // Small window for responsiveness
+  const ANGLE_THRESHOLD = 0.2 // Keep the small threshold for responsiveness
+  const EWMA_ALPHA = 0.2 // Increased from 0.2 for more responsiveness
+  const lastStableAngleRef = useRef<number>(0)
 
   // Refs
   const deviceResponseTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -519,11 +526,11 @@ export function MiniTFDControl() {
 
         setTimeout(() => {
           getCurrentVelocity();
-        }, 50);
+        }, 100); // Increased delay
 
         setTimeout(() => {
           getCurrentTorque();
-        }, 100);
+        }, 200); // Increased delay
 
       } catch (err) {
         console.error("Error during polling:", err)
@@ -744,7 +751,7 @@ export function MiniTFDControl() {
     }
 
     const handleSerialData = (event: any, data: string) => {
-      console.log("Received serial data:", data)
+      // console.log("Received serial data:", data)
 
       const cleanData = data.trim()
 
@@ -838,6 +845,27 @@ export function MiniTFDControl() {
       }
     }
   }, [isElectron])
+
+  // Update filtered angle using simple moving average
+  useEffect(() => {
+    if (state.currentAngle === null) return
+
+    // Add new angle to history
+    angleHistoryRef.current.push(state.currentAngle)
+    // Keep only the last FILTER_WINDOW_SIZE samples
+    if (angleHistoryRef.current.length > FILTER_WINDOW_SIZE) {
+      angleHistoryRef.current.shift()
+    }
+
+    // Calculate simple moving average
+    const sum = angleHistoryRef.current.reduce((a, b) => a + b, 0)
+    const avg = sum / angleHistoryRef.current.length
+
+    // Only update if change is significant
+    if (Math.abs(avg - filteredAngle) > ANGLE_THRESHOLD) {
+      setFilteredAngle(Math.floor(avg)) // Truncate decimals
+    }
+  }, [state.currentAngle])
 
   // Handle mode change
   const handleModeChange = (newMode: HapticMode) => {
@@ -1019,7 +1047,7 @@ export function MiniTFDControl() {
                 className="form-input bg-gray-800 text-yellow-400 font-mono text-center text-base px-1 py-1"
                 style={{ fontSize: "1rem", width: "100%", minWidth: 0, padding: "0.3rem 0.2rem" }}
               >
-                {state.currentAngle.toFixed(1)}°
+                {Math.round(filteredAngle)}°
               </div>
             </div>
 
@@ -1029,7 +1057,7 @@ export function MiniTFDControl() {
                 className="form-input bg-gray-800 text-blue-400 font-mono text-center text-base px-1 py-1"
                 style={{ fontSize: "1rem", width: "100%", minWidth: 0, padding: "0.3rem 0.2rem" }}
               >
-                {state.currentVelocity.toFixed(1)} RPM
+                {Math.abs(state.currentVelocity) <= 4 ? '0.0' : state.currentVelocity.toFixed(1)} RPM
               </div>
             </div>
 
@@ -1095,13 +1123,13 @@ export function MiniTFDControl() {
         </div>
       </ScrollArea>
 
-      {/* Main content - single layout that doesn't change */}
-      <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
+      {/* Main content */}
+      <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-auto">
+        {/* Header */}
         <header
-          className="flex h-14 items-center gap-4 border-b border-gray-700 px-6 min-w-0 bg-gray-900"
+          className="flex h-14 items-center gap-4 border-b border-gray-700 px-6 min-w-0 bg-gray-900 w-full"
           style={{ paddingTop: "0.5rem", paddingBottom: "0.5rem" }}
         >
-          {/* Left-aligned items: Title and Status - REVERTED TO ORIGINAL HEADER CONTENT */}
           <div className="badge badge-gray text-base" style={{ padding: "0.5rem 1rem", fontWeight: 600 }}>
             {hapticModes.find((m) => m.id === state.mode)?.label} -{" "}
             {state.deviceType === "knob" ? "Knob" : "Steering Wheel"}
@@ -1113,129 +1141,128 @@ export function MiniTFDControl() {
           )}
           {isConnected && (
             <div className="badge badge-gray text-xs" style={{ marginLeft: 8 }}>
-              {state.selectedPort} @ {state.baudRate}
+              {state.selectedPort} @ {state.baudRate} baud
             </div>
           )}
-
         </header>
 
-        {/* Fixed layout for dials and controls */}
-        <div className="flex-1 flex flex-col items-center justify-center p-4 min-w-0 min-h-0 overflow-auto">
-          {/* Velocity Dial positioned above the main dial */}
-          <div className="flex justify-center mb-4">
-            <VelocityDial
-              velocity={state.currentTorque}
-              isConnected={isConnected}
-              isDeviceResponding={isDeviceResponding}
-            />
-          </div>
+        {/* Content container with vertical centering */}
+        <div className="flex-1 flex flex-col items-center justify-center p-4">
+          {/* Dial Container - side by side layout */}
+          <div className="flex justify-center items-center gap-8" style={{ width: "100%", maxWidth: 900 }}>
+            {/* Torque Dial */}
+            <div className="flex-shrink-0" style={{ width: 400 }}>
+              <VelocityDial
+                velocity={state.currentTorque}
+                isConnected={isConnected}
+                isDeviceResponding={isDeviceResponding}
+              />
+            </div>
 
-          {/* Dial Container - fixed size and position */}
-          <div className="mb-4 flex justify-center" style={{ width: "100%", maxWidth: 420 }}>
-            {/* Conditional rendering of dial based on device type */}
-            {state.deviceType === "knob" ? (
-              <DialVisualization
-                mode={state.mode}
-                angle={state.currentAngle}
-                velocity={state.currentVelocity}
-                torque={state.currentTorque}
-                targetAngle={state.targetAngle}
-                endstopMinAngle={state.endstopMinAngle}
-                endstopMaxAngle={state.endstopMaxAngle}
-                isConnected={isConnected}
-                lastUpdate={lastAngleUpdate}
-                isDeviceResponding={isDeviceResponding}
-                deviceType="knob"
-              />
-            ) : (
-              <SteeringWheelVisualization
-                mode={state.mode}
-                angle={state.currentAngle}
-                velocity={state.currentVelocity}
-                torque={state.currentTorque}
-                targetAngle={state.targetAngle}
-                endstopMinAngle={state.endstopMinAngle}
-                endstopMaxAngle={state.endstopMaxAngle}
-                isConnected={isConnected}
-                lastUpdate={lastAngleUpdate}
-                isDeviceResponding={isDeviceResponding}
-              />
-            )}
+            {/* Main Dial */}
+            <div className="flex-shrink-0" style={{ width: 400 }}>
+              {state.deviceType === "knob" ? (
+                <DialVisualization
+                  mode={state.mode}
+                  angle={filteredAngle}
+                  velocity={state.currentVelocity}
+                  torque={state.currentTorque}
+                  targetAngle={state.targetAngle}
+                  endstopMinAngle={state.endstopMinAngle}
+                  endstopMaxAngle={state.endstopMaxAngle}
+                  isConnected={isConnected}
+                  lastUpdate={lastAngleUpdate}
+                  isDeviceResponding={isDeviceResponding}
+                  deviceType="knob"
+                />
+              ) : (
+                <SteeringWheelVisualization
+                  mode={state.mode}
+                  angle={filteredAngle}
+                  velocity={state.currentVelocity}
+                  torque={state.currentTorque}
+                  targetAngle={state.targetAngle}
+                  endstopMinAngle={state.endstopMinAngle}
+                  endstopMaxAngle={state.endstopMaxAngle}
+                  isConnected={isConnected}
+                  lastUpdate={lastAngleUpdate}
+                  isDeviceResponding={isDeviceResponding}
+                />
+              )}
+            </div>
           </div>
 
           {/* Controls below dial */}
-          <div className="w-full max-w-2xl flex flex-col items-center">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 w-full">
-              {state.mode === "increased-torque" && (
-                <div className="form-control" style={{ maxWidth: 220, margin: "0 auto" }}>
-                  <label className="form-label">Torque (0.0 - 1.0)</label>
-                  <input
-                    type="number"
-                    className="form-input text-sm px-2 py-1"
-                    min="0"
-                    max="1"
-                    step="0.1"
-                    value={state.torque}
-                    onChange={(e) => updateState({ torque: Number.parseFloat(e.target.value) || 0 })}
-                    style={{ fontSize: "1rem", width: "100%" }}
-                  />
-                  <div className="text-xs text-gray-400 mt-1">Current: {state.torque.toFixed(1)}</div>
-                </div>
-              )}
+          <div className="w-full max-w-2xl flex flex-col items-center mt-4">
+            {state.mode === "increased-torque" && (
+              <div className="form-control" style={{ maxWidth: 220, margin: "0 auto" }}>
+                <label className="form-label">Torque (0.0 - 1.0)</label>
+                <input
+                  type="number"
+                  className="form-input text-sm px-2 py-1"
+                  min="0"
+                  max="1"
+                  step="0.1"
+                  value={state.torque}
+                  onChange={(e) => updateState({ torque: Number.parseFloat(e.target.value) || 0 })}
+                  style={{ fontSize: "1rem", width: "100%" }}
+                />
+                <div className="text-xs text-gray-400 mt-1">Current: {state.torque.toFixed(1)}</div>
+              </div>
+            )}
 
-              {state.mode === "proportional-control" && (
-                <div className="form-control" style={{ maxWidth: 220, margin: "0 auto" }}>
-                  <label className="form-label">Stiffness</label>
-                  <input
-                    type="number"
-                    className="form-input text-sm px-2 py-1"
-                    min="0"
-                    max="2"
-                    step="0.1"
-                    value={state.stiffness}
-                    onChange={(e) => updateState({ stiffness: Number.parseFloat(e.target.value) || 0 })}
-                    style={{ fontSize: "1rem", width: "100%" }}
-                  />
-                  <div className="text-xs text-gray-400 mt-1">Current: {state.stiffness.toFixed(1)}</div>
-                </div>
-              )}
+            {state.mode === "proportional-control" && (
+              <div className="form-control" style={{ maxWidth: 220, margin: "0 auto" }}>
+                <label className="form-label">Stiffness</label>
+                <input
+                  type="number"
+                  className="form-input text-sm px-2 py-1"
+                  min="0"
+                  max="2"
+                  step="0.1"
+                  value={state.stiffness}
+                  onChange={(e) => updateState({ stiffness: Number.parseFloat(e.target.value) || 0 })}
+                  style={{ fontSize: "1rem", width: "100%" }}
+                />
+                <div className="text-xs text-gray-400 mt-1">Current: {state.stiffness.toFixed(1)}</div>
+              </div>
+            )}
 
-              {state.mode === "endstops" && (
-                <div className="form-control" style={{ maxWidth: 220, margin: "0 auto" }}>
-                  <label className="form-label">Turns Lock-to-Lock</label>
-                  <input
-                    type="number"
-                    className="form-input text-sm px-2 py-1"
-                    min="0.0"
-                    max="10"
-                    step="0.5"
-                    value={state.endstopTurns}
-                    onChange={(e) => updateState({ endstopTurns: Number.parseFloat(e.target.value) || 0.5 })}
-                    style={{ fontSize: "1rem", width: "100%" }}
-                  />
-                  <div className="text-xs text-gray-400 mt-1">
-                    Range: {state.endstopMinAngle.toFixed(0)}° to {state.endstopMaxAngle.toFixed(0)}°
-                  </div>
+            {state.mode === "endstops" && (
+              <div className="form-control" style={{ maxWidth: 220, margin: "0 auto" }}>
+                <label className="form-label">Turns Lock-to-Lock</label>
+                <input
+                  type="number"
+                  className="form-input text-sm px-2 py-1"
+                  min="0.0"
+                  max="10"
+                  step="0.5"
+                  value={state.endstopTurns}
+                  onChange={(e) => updateState({ endstopTurns: Number.parseFloat(e.target.value) || 0.5 })}
+                  style={{ fontSize: "1rem", width: "100%" }}
+                />
+                <div className="text-xs text-gray-400 mt-1">
+                  Range: {state.endstopMinAngle.toFixed(0)}° to {state.endstopMaxAngle.toFixed(0)}°
                 </div>
-              )}
+              </div>
+            )}
 
-              {state.mode === "inertial-control" && (
-                <div className="form-control" style={{ maxWidth: 220, margin: "0 auto" }}>
-                  <label className="form-label">Inertia Factor</label>
-                  <input
-                    type="number"
-                    className="form-input text-sm px-2 py-1"
-                    min="0"
-                    max="5"
-                    step="0.1"
-                    value={state.stiffness}
-                    onChange={(e) => updateState({ stiffness: Number.parseFloat(e.target.value) || 0 })}
-                    style={{ fontSize: "1rem", width: "100%" }}
-                  />
-                  <div className="text-xs text-gray-400 mt-1">Current: {state.stiffness.toFixed(1)}</div>
-                </div>
-              )}
-            </div>
+            {state.mode === "inertial-control" && (
+              <div className="form-control" style={{ maxWidth: 220, margin: "0 auto" }}>
+                <label className="form-label">Inertia Factor</label>
+                <input
+                  type="number"
+                  className="form-input text-sm px-2 py-1"
+                  min="0"
+                  max="5"
+                  step="0.1"
+                  value={state.stiffness}
+                  onChange={(e) => updateState({ stiffness: Number.parseFloat(e.target.value) || 0 })}
+                  style={{ fontSize: "1rem", width: "100%" }}
+                />
+                <div className="text-xs text-gray-400 mt-1">Current: {state.stiffness.toFixed(1)}</div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -1289,7 +1316,7 @@ function DialVisualization({
 
   const getDialOpacity = () => {
     if (!isConnected) return 0.3
-    if (mode === "lock") return 0.5
+    if (mode === "lock") return 0.5 // Reduced opacity for lock mode
     return 1
   }
 
@@ -1447,14 +1474,33 @@ function DialVisualization({
     )
   }
 
+  const renderReferenceMark = () => {
+    const radius = 190 // Slightly larger than the dial radius
+    const markLength = 10
+    const markAngleInRadians = -Math.PI / 2 // Angle for the top (0 degrees visual)
+    const startX = radius * Math.cos(markAngleInRadians)
+    const startY = radius * Math.sin(markAngleInRadians)
+    const endX = (radius + markLength) * Math.cos(markAngleInRadians)
+    const endY = (radius + markLength) * Math.sin(markAngleInRadians)
+
+    return (
+      <line
+        x1={startX + 200}
+        y1={startY + 200}
+        x2={endX + 200}
+        y2={endY + 200}
+        stroke="currentColor"
+        strokeWidth={2}
+        opacity={0.8}
+      />
+    )
+  }
+
   return (
-    <div className="dial-container">
+    <div className="relative w-[400px] h-[400px]">
       <svg
-        width="400"
-        height="400"
         viewBox="0 0 400 400"
-        className="pointer-events-none"
-        style={{ opacity: getDialOpacity() }}
+        className="w-full h-full"
       >
         <defs>
           <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
@@ -1493,7 +1539,7 @@ function DialVisualization({
         <circle cx="200" cy="200" r="8" fill={getDialColor()} />
 
         <text x="200" y="250" textAnchor="middle" fill={getDialColor()} fontSize="16" fontWeight="bold">
-          {mode === "endstops" ? angle.toFixed(1) + "°" : wrap180(angle).toFixed(1) + "°"}
+          {mode === "endstops" ? Math.round(angle) + "°" : Math.round(wrap180(angle)) + "°"}
         </text>
 
         {!isConnected && (
@@ -1512,6 +1558,7 @@ function DialVisualization({
             {(angle / 360).toFixed(2)} turns
           </text>
         )}
+        {renderReferenceMark()}
       </svg>
     </div>
   )
@@ -1564,7 +1611,7 @@ function SteeringWheelVisualization({
 
   const getDialOpacity = () => {
     if (!isConnected) return 0.3
-    if (mode === "lock") return 0.5
+    if (mode === "lock") return 0.5 // Reduced opacity for lock mode
     return 1
   }
 
@@ -1692,14 +1739,33 @@ function SteeringWheelVisualization({
     return <g>{trailElements}</g>
   }
 
+  const renderReferenceMark = () => {
+    const radius = 190 // Slightly larger than the wheel radius
+    const markLength = 10
+    const markAngleInRadians = -Math.PI / 2 // Angle for the top (0 degrees visual)
+    const startX = radius * Math.cos(markAngleInRadians)
+    const startY = radius * Math.sin(markAngleInRadians)
+    const endX = (radius + markLength) * Math.cos(markAngleInRadians)
+    const endY = (radius + markLength) * Math.sin(markAngleInRadians)
+
+    return (
+      <line
+        x1={startX + 200}
+        y1={startY + 200}
+        x2={endX + 200}
+        y2={endY + 200}
+        stroke="currentColor"
+        strokeWidth={2}
+        opacity={0.8}
+      />
+    )
+  }
+
   return (
-    <div className="dial-container">
+    <div className="relative w-[400px] h-[400px]">
       <svg
-        width="400"
-        height="400"
         viewBox="0 0 400 400"
-        className="pointer-events-none"
-        style={{ opacity: getDialOpacity() }}
+        className="w-full h-full"
       >
         {/* Outer steering wheel rim */}
         <circle cx="200" cy="200" r="180" fill="none" stroke={getDialColor()} strokeWidth={getStrokeWidth()} />
@@ -1725,7 +1791,7 @@ function SteeringWheelVisualization({
 
         {/* Angle display */}
         <text x="200" y="250" textAnchor="middle" fill={getDialColor()} fontSize="16" fontWeight="bold">
-          {mode === "endstops" ? angle.toFixed(1) + "°" : wrap180(angle).toFixed(1) + "°"}
+          {mode === "endstops" ? Math.round(angle) + "°" : Math.round(wrap180(angle)) + "°"}
         </text>
 
         {/* Connection status indicator */}
@@ -1746,6 +1812,7 @@ function SteeringWheelVisualization({
             {(angle / 360).toFixed(2)} turns
           </text>
         )}
+        {renderReferenceMark()}
       </svg>
     </div>
   )
@@ -1810,10 +1877,10 @@ function VelocityDial({ velocity: torqueValue, isConnected, isDeviceResponding }
 
   const dialColor = !isConnected ? "#6b7280" : !isDeviceResponding ? "#ef4444" : "#facc15";
 
-  const svgSize = 180;
+  const svgSize = 400; // Updated to match main dial size
   const centerX = svgSize / 2;
   const centerY = svgSize / 2;
-  const radius = svgSize / 2 - 10;
+  const radius = svgSize / 2 - 20; // Adjusted for larger size
 
   // Define the start and end points for the needle, offset from the center
   // Increased needleInnerRadius to prevent overlap with text
@@ -1851,35 +1918,35 @@ function VelocityDial({ velocity: torqueValue, isConnected, isDeviceResponding }
       />
 
       {/* Display torque value */}
-      <text x={centerX} y={centerY + 20} textAnchor="middle" fill={dialColor} fontSize="18" fontWeight="bold">
+      <text x={centerX} y={centerY + 40} textAnchor="middle" fill={dialColor} fontSize="24" fontWeight="bold">
         {clampedTorque.toFixed(2)} Nm
       </text>
 
       {/* Update dial labels to 0, 0.5, and 1.0 for Torque */}
       <text
-        x={centerX + Math.cos(((startSweepAngle - 90) * Math.PI) / 180) * (radius + 15)}
-        y={centerY + Math.sin(((startSweepAngle - 90) * Math.PI) / 180) * (radius + 15)}
+        x={centerX + Math.cos(((startSweepAngle - 90) * Math.PI) / 180) * (radius + 30)}
+        y={centerY + Math.sin(((startSweepAngle - 90) * Math.PI) / 180) * (radius + 30)}
         textAnchor="end"
         fill={dialColor}
-        fontSize="12"
+        fontSize="16"
       >
         0
       </text>
       <text
-        x={centerX + Math.cos(((0 - 90) * Math.PI) / 180) * (radius + 15)}
-        y={centerY + Math.sin(((0 - 90) * Math.PI) / 180) * (radius + 15)}
+        x={centerX + Math.cos(((0 - 90) * Math.PI) / 180) * (radius + 30)}
+        y={centerY + Math.sin(((0 - 90) * Math.PI) / 180) * (radius + 30)}
         textAnchor="middle"
         fill={dialColor}
-        fontSize="12"
+        fontSize="16"
       >
         0.5
       </text>
       <text
-        x={centerX + Math.cos(((endSweepAngle - 90) * Math.PI) / 180) * (radius + 15)}
-        y={centerY + Math.sin(((endSweepAngle - 90) * Math.PI) / 180) * (radius + 15)}
+        x={centerX + Math.cos(((endSweepAngle - 90) * Math.PI) / 180) * (radius + 30)}
+        y={centerY + Math.sin(((endSweepAngle - 90) * Math.PI) / 180) * (radius + 30)}
         textAnchor="start"
         fill={dialColor}
-        fontSize="12"
+        fontSize="16"
       >
         1.0
       </text>

@@ -294,7 +294,7 @@ export function useHapticSerial() {
     if (!isElectron) return
 
     const handleSerialData = (event: any, data: string) => {
-      console.log("Received serial data:", data)
+      // console.log("Received serial data:", data)
       setLastResponse({
         timestamp: new Date().toISOString(),
         type: "received",
