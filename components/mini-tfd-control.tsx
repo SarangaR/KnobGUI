@@ -158,7 +158,7 @@ export function MiniTFDControl() {
     selectedPort: "",
     baudRate: 115200,
     isPolling: true,
-    pollInterval: 30,
+    pollInterval: 20,
     endstopTurns: 2.5,
     endstopMinAngle: -450,
     endstopMaxAngle: 450,
@@ -183,6 +183,13 @@ export function MiniTFDControl() {
   const ANGLE_THRESHOLD = 0.2 // Keep the small threshold for responsiveness
   const EWMA_ALPHA = 0.2 // Increased from 0.2 for more responsiveness
   const lastStableAngleRef = useRef<number>(0)
+  // Add new state variables for reconnection logic
+  const [reconnectAttempts, setReconnectAttempts] = useState(0)
+  const [isReconnecting, setIsReconnecting] = useState(false)
+  const [isInGracePeriod, setIsInGracePeriod] = useState(false)
+  const [lastPortPath, setLastPortPath] = useState<string>("")
+  const [lastBaudRate, setLastBaudRate] = useState<number>(115200)
+  const [hasAttemptedReconnect, setHasAttemptedReconnect] = useState(false)
 
   // Refs
   const deviceResponseTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -338,7 +345,78 @@ export function MiniTFDControl() {
     }
   };
 
-  // Connect to serial port
+  // Add new function to check device responsiveness
+  const checkDeviceResponsiveness = async (): Promise<boolean> => {
+    if (!isElectron || !window.electronAPI) return false;
+    
+    try {
+      const result = await window.electronAPI.serialWrite("get all\n");
+      return result.success;
+    } catch (err) {
+      console.error("Error checking device responsiveness:", err);
+      return false;
+    }
+  };
+
+  // Add new function to handle reconnection
+  const handleReconnection = async () => {
+    if (isReconnecting || reconnectAttempts >= 3 || !lastPortPath) return;
+    
+    console.log(`Attempting reconnection (attempt ${reconnectAttempts + 1}/3)...`);
+    setIsReconnecting(true);
+    
+    try {
+      // First disconnect
+      if (isElectron && window.electronAPI) {
+        await window.electronAPI.serialDisconnect();
+      }
+      
+      // Wait a bit before reconnecting
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Attempt to reconnect
+      if (isElectron && window.electronAPI) {
+        const result = await window.electronAPI.serialConnect(lastPortPath, lastBaudRate);
+        if (result.success) {
+          setIsConnected(true);
+          setIsInGracePeriod(true);
+          
+          // Start grace period timer
+          setTimeout(async () => {
+            setIsInGracePeriod(false);
+            const isResponding = await checkDeviceResponsiveness();
+            if (!isResponding) {
+              setReconnectAttempts(prev => prev + 1);
+              if (reconnectAttempts + 1 < 3) {
+                handleReconnection();
+              } else {
+                setError("Device not responding after reconnection attempts");
+                setIsDeviceResponding(false);
+              }
+            } else {
+              setIsDeviceResponding(true);
+              setReconnectAttempts(0);
+              setHasAttemptedReconnect(false);
+            }
+          }, 2000); // 2 second grace period
+        } else {
+          throw new Error(result.error || "Reconnection failed");
+        }
+      }
+    } catch (err) {
+      console.error("Reconnection failed:", err);
+      setReconnectAttempts(prev => prev + 1);
+      if (reconnectAttempts + 1 < 3) {
+        handleReconnection();
+      } else {
+        setError("Failed to reconnect after multiple attempts");
+      }
+    } finally {
+      setIsReconnecting(false);
+    }
+  };
+
+  // Modify connect function to store last connection details
   const connect = async (portPath?: string, baudRate?: number) => {
     const targetPort = portPath || state.selectedPort;
     const targetBaudRate = baudRate || state.baudRate;
@@ -347,6 +425,12 @@ export function MiniTFDControl() {
       setError("Please select a port first")
       return
     }
+
+    // Store connection details for potential reconnection
+    setLastPortPath(targetPort);
+    setLastBaudRate(targetBaudRate);
+    setReconnectAttempts(0);
+    setHasAttemptedReconnect(false);
 
     // Find and store the productID of the port we're connecting to
     const port = availablePorts.find(p => p.path === targetPort);
@@ -371,12 +455,25 @@ export function MiniTFDControl() {
         const result = await window.electronAPI.serialConnect(targetPort, targetBaudRate)
         if (result.success) {
           setIsConnected(true)
+          setIsInGracePeriod(true)
           setLastResponse({
             status: "connecting",
             port: targetPort,
             baudRate: targetBaudRate,
             timestamp: new Date().toISOString(),
           })
+          
+          // Start grace period timer
+          setTimeout(async () => {
+            setIsInGracePeriod(false);
+            const isResponding = await checkDeviceResponsiveness();
+            if (!isResponding) {
+              setError("Device not responding after connection");
+              setIsDeviceResponding(false);
+            } else {
+              setIsDeviceResponding(true);
+            }
+          }, 2000); // 2 second grace period
         } else {
           throw new Error(result.error || "Connection failed")
         }
@@ -429,19 +526,19 @@ export function MiniTFDControl() {
     try {
       if (isElectron && window.electronAPI) {
         setPendingAngleRequest(true)
-        const result = await window.electronAPI.serialWrite("get angle\n")
+        const result = await window.electronAPI.serialWrite("get all\n")
         if (!result.success) {
           setPendingAngleRequest(false)
           setIsDeviceResponding(false)
-          setError("Device not responding to angle request")
-          throw new Error("Failed to request angle")
+          setError("Device not responding to data request")
+          throw new Error("Failed to request data")
         }
         return null
       }
       setIsDeviceResponding(false)
       return null
     } catch (err) {
-      console.error("Failed to get current angle:", err)
+      console.error("Failed to get current data:", err)
       setPendingAngleRequest(false)
       setIsDeviceResponding(false)
       return null
@@ -521,17 +618,8 @@ export function MiniTFDControl() {
       }
 
       try {
-        // Request angle, velocity, and torque in sequence
+        // Request all data with a single command
         getCurrentAngle()
-
-        setTimeout(() => {
-          getCurrentVelocity();
-        }, 100); // Increased delay
-
-        setTimeout(() => {
-          getCurrentTorque();
-        }, 200); // Increased delay
-
       } catch (err) {
         console.error("Error during polling:", err)
       }
@@ -746,22 +834,27 @@ export function MiniTFDControl() {
   // Set up event handlers for incoming serial data
   useEffect(() => {
     if (!isElectron || !window.electronAPI) {
+      console.log("Electron API not available");
       setIsDeviceResponding(false)
       return
     }
 
+    console.log("Setting up serial data handlers...");
+
     const handleSerialData = (event: any, data: string) => {
-      // console.log("Received serial data:", data)
-
+      console.log("Raw data received:", data); // Log raw data
       const cleanData = data.trim()
+      console.log("Cleaned data:", cleanData); // Log cleaned data
 
-      // Check if the response looks like valid sensor data (float) or a known command response
-      const isSensorData = cleanData.startsWith("ANGLE:") || cleanData.startsWith("VEL:") || cleanData.startsWith("TORQUE:");
-      const isCommandResponse = cleanData === "OK"; // Assuming device sends OK for successful commands
+      // Check if the response looks like valid sensor data (combined format)
+      const isSensorData = cleanData.startsWith("ANGLE:") && cleanData.includes("VEL:") && cleanData.includes("TORQUE:");
+      const isCommandResponse = cleanData === "OK";
+      
+      console.log("Data type check:", { isSensorData, isCommandResponse }); // Log data type check
 
       if (isSensorData || isCommandResponse) {
-          setIsDeviceResponding(true); // Device is responding if we get valid data or command response
-          setError(null); // Clear any previous device not responding error
+          setIsDeviceResponding(true);
+          setError(null);
 
           // Reset the timeout whenever a valid response is received
           if (deviceResponseTimeoutRef.current) {
@@ -771,39 +864,81 @@ export function MiniTFDControl() {
             console.log("Device response timeout.");
             setIsDeviceResponding(false);
             setError("Device stopped responding.");
-          }, 2000); // 2 second timeout for no response
+            
+            // Trigger reconnection if we haven't already attempted it
+            if (!hasAttemptedReconnect && isConnected) {
+              setHasAttemptedReconnect(true);
+              handleReconnection();
+            }
+          }, 2000);
       }
 
-      if (cleanData.startsWith("ANGLE:")) {
-        const angleString = cleanData.substring("ANGLE:".length)
-        const numericAngle = Number.parseFloat(angleString)
-        if (!isNaN(numericAngle)) {
-          const clampedAngle = clampAngle(numericAngle)
-          updateState({ currentAngle: clampedAngle })
-          setLastAngleUpdate(new Date())
-          setPendingAngleRequest(false)
-        } else {
-          console.warn("Received non-numeric angle data:", angleString)
+      if (isSensorData) {
+        try {
+          console.log("Starting to parse sensor data..."); // Log start of parsing
+          
+          // Parse the combined response format
+          const parts = cleanData.split(',');
+          console.log("Split parts:", parts); // Log split parts
+          
+          // Extract values using regex with proper error handling
+          const angleMatch = parts[0].match(/ANGLE:([-\d.]+)/);
+          const velMatch = parts[1].match(/VEL:([-\d.]+)/);
+          const torqueMatch = parts[2].match(/TORQUE:([-\d.]+)/);
+          
+          console.log("Regex matches:", { // Log regex matches
+            angleMatch,
+            velMatch,
+            torqueMatch
+          });
+
+          // Update angle if valid
+          if (angleMatch && angleMatch[1]) {
+            const numericAngle = parseFloat(angleMatch[1]);
+            console.log("Parsed angle:", numericAngle); // Log parsed angle
+            if (!isNaN(numericAngle)) {
+              const clampedAngle = clampAngle(numericAngle);
+              updateState({ currentAngle: clampedAngle });
+              setLastAngleUpdate(new Date());
+              setPendingAngleRequest(false);
+            } else {
+              console.warn("Invalid angle value:", angleMatch[1]);
+            }
+          }
+
+          // Update velocity if valid
+          if (velMatch && velMatch[1]) {
+            const numericVelocity = parseFloat(velMatch[1]);
+            console.log("Parsed velocity:", numericVelocity); // Log parsed velocity
+            if (!isNaN(numericVelocity)) {
+              updateState({ currentVelocity: numericVelocity });
+              setPendingVelocityRequest(false);
+            } else {
+              console.warn("Invalid velocity value:", velMatch[1]);
+            }
+          }
+
+          // Update torque if valid
+          if (torqueMatch && torqueMatch[1]) {
+            const numericTorque = parseFloat(torqueMatch[1]);
+            console.log("Parsed torque:", numericTorque); // Log parsed torque
+            if (!isNaN(numericTorque)) {
+              updateState({ currentTorque: numericTorque });
+            } else {
+              console.warn("Invalid torque value:", torqueMatch[1]);
+            }
+          }
+
+          // Log the parsed values for debugging
+          console.log("Final parsed values:", {
+            angle: angleMatch ? parseFloat(angleMatch[1]) : null,
+            velocity: velMatch ? parseFloat(velMatch[1]) : null,
+            torque: torqueMatch ? parseFloat(torqueMatch[1]) : null
+          });
+
+        } catch (err) {
+          console.error("Error parsing sensor data:", err, "Raw data:", cleanData);
         }
-      } else if (cleanData.startsWith("VEL:")) {
-        const velocityString = cleanData.substring("VEL:".length)
-        const numericVelocity = Number.parseFloat(velocityString)
-        if (!isNaN(numericVelocity)) {
-          updateState({ currentVelocity: numericVelocity })
-          setPendingVelocityRequest(false)
-        } else {
-          console.warn("Received non-numeric velocity data:", velocityString)
-        }
-      } else if (cleanData.startsWith("TORQUE:")) {
-        const torqueString = cleanData.substring("TORQUE:".length);
-        const numericTorque = Number.parseFloat(torqueString);
-        if (!isNaN(numericTorque)) {
-          updateState({ currentTorque: numericTorque });
-        } else {
-          console.warn("Received non-numeric torque data:", torqueString);
-        }
-      } else {
-        console.warn("Received unhandled serial data:", cleanData)
       }
 
       setLastResponse({
@@ -829,12 +964,14 @@ export function MiniTFDControl() {
       }
     }
 
+    console.log("Registering serial event handlers...");
     const api = window.electronAPI as NonNullable<typeof window.electronAPI>
     api.onSerialData(handleSerialData)
     api.onSerialError(handleSerialError)
     api.onSerialDisconnected(handleSerialDisconnected)
 
     return () => {
+      console.log("Cleaning up serial event handlers...");
       if (api.removeAllListeners) {
         api.removeAllListeners("serial-data")
         api.removeAllListeners("serial-error")
@@ -844,11 +981,17 @@ export function MiniTFDControl() {
         clearTimeout(deviceResponseTimeoutRef.current)
       }
     }
-  }, [isElectron])
+  }, [isElectron, isConnected, hasAttemptedReconnect])
 
   // Update filtered angle using simple moving average
   useEffect(() => {
     if (state.currentAngle === null) return
+
+    // For endstop mode, use the raw angle value directly
+    if (state.mode === "endstops") {
+      setFilteredAngle(state.currentAngle)
+      return
+    }
 
     // Add new angle to history
     angleHistoryRef.current.push(state.currentAngle)
@@ -865,7 +1008,7 @@ export function MiniTFDControl() {
     if (Math.abs(avg - filteredAngle) > ANGLE_THRESHOLD) {
       setFilteredAngle(Math.floor(avg)) // Truncate decimals
     }
-  }, [state.currentAngle])
+  }, [state.currentAngle, state.mode])
 
   // Handle mode change
   const handleModeChange = (newMode: HapticMode) => {
