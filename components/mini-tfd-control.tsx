@@ -16,8 +16,10 @@ import {
   Gauge,
   ChevronDown,
   ChevronUp,
+  Link2Icon,
 } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Switch } from "@radix-ui/react-switch";
 
 // Constants for product ID persistence
 const DEFAULT_PRODUCT_ID = "1002";
@@ -47,8 +49,11 @@ type HapticMode =
   | "center-detent"
   | "proportional-control"
   | "inertial-control"
+  | "latch"
 
 type DeviceType = "knob" | "steering-wheel"
+
+type EndstopMode = "none" | "proportional" | "soft" | "medium" | "rough" | "center"
 
 interface TFDState {
   mode: HapticMode
@@ -66,6 +71,8 @@ interface TFDState {
   endstopMinAngle: number
   endstopMaxAngle: number
   deviceType: DeviceType
+  endstopMode: EndstopMode
+  isSticky: boolean
 }
 
 interface SerialPortInfo {
@@ -92,6 +99,7 @@ const hapticModes: { id: HapticMode; label: string; icon: any; devices: DeviceTy
   { id: "endstops", label: "Endstops", icon: ArrowRight, devices: ["knob", "steering-wheel"] },
   { id: "proportional-control", label: "Proportional Control", icon: Settings, devices: ["knob", "steering-wheel"] },
   { id: "inertial-control", label: "Inertial Control", icon: Gauge, devices: ["steering-wheel"] },
+  { id: "latch", label: "Latch", icon: Link2Icon, devices: ["knob"] },
 ]
 
 const baudRates = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600]
@@ -159,10 +167,12 @@ export function MiniTFDControl() {
     baudRate: 115200,
     isPolling: true,
     pollInterval: 20,
-    endstopTurns: 2.5,
-    endstopMinAngle: -450,
-    endstopMaxAngle: 450,
+    endstopTurns: 1.0,
+    endstopMinAngle: -180,
+    endstopMaxAngle: 180,
     deviceType: "knob",
+    endstopMode: "none",
+    isSticky: false,
   })
   const [isConnected, setIsConnected] = useState(false)
   const [isConnecting, setIsConnecting] = useState(false)
@@ -247,9 +257,9 @@ export function MiniTFDControl() {
   // Don't normalize angle for multi-turn applications - keep the full range
   const clampAngle = (angle: number) => {
     // For endstop mode, clamp to the configured range
-    if (state.mode === "endstops") {
-      return Math.max(state.endstopMinAngle, Math.min(state.endstopMaxAngle, angle))
-    }
+    // if (state.mode === "endstops") {
+    //   return Math.max(state.endstopMinAngle, Math.min(state.endstopMaxAngle, angle))
+    // }
     // For other modes, allow full range
     return angle
   }
@@ -656,21 +666,26 @@ export function MiniTFDControl() {
       const command = formatTFDCommand(state)
       console.log("Sending TFD config:", command)
 
-      if (isElectron && window.electronAPI) {
-        const result = await window.electronAPI.serialWrite(command)
-        if (!result.success) {
-          throw new Error(result.error || "Failed to send config")
-        }
-        setError(null)
-        setLastResponse({
-          timestamp: new Date().toISOString(),
-          command: "tfd_config",
-          sent: command,
-          config: state,
-        })
-      } else {
-        setError("Serial communication not available in browser")
+      const result = await window.electronAPI.serialWrite(command)
+      if (!result.success) {
+        throw new Error(result.error || "Failed to send config")
       }
+
+      // Send sticky command separately if in endstop mode
+      if (state.mode === "endstops") {
+        const stickyResult = await window.electronAPI.serialWrite(`set sticky:${state.isSticky ? "on" : "off"}\n`)
+        if (!stickyResult.success) {
+          throw new Error(stickyResult.error || "Failed to set sticky mode")
+        }
+      }
+
+      setError(null)
+      setLastResponse({
+        timestamp: new Date().toISOString(),
+        command: "tfd_config",
+        sent: command,
+        config: state,
+      })
     } catch (err) {
       console.error("Failed to send TFD config:", err)
       setError(err instanceof Error ? err.message : "Failed to send config")
@@ -988,33 +1003,34 @@ export function MiniTFDControl() {
     if (state.currentAngle === null) return
 
     // For endstop mode, use the raw angle value directly
-    if (state.mode === "endstops") {
-      setFilteredAngle(state.currentAngle)
-      return
-    }
+    // if (state.mode === "endstops") {
+    //   setFilteredAngle(state.currentAngle)
+    //   return
+    // }
 
-    // Add new angle to history
-    angleHistoryRef.current.push(state.currentAngle)
-    // Keep only the last FILTER_WINDOW_SIZE samples
-    if (angleHistoryRef.current.length > FILTER_WINDOW_SIZE) {
-      angleHistoryRef.current.shift()
-    }
+    // // Add new angle to history
+    // angleHistoryRef.current.push(state.currentAngle)
+    // // Keep only the last FILTER_WINDOW_SIZE samples
+    // if (angleHistoryRef.current.length > FILTER_WINDOW_SIZE) {
+    //   angleHistoryRef.current.shift()
+    // }
 
-    // Calculate simple moving average
-    const sum = angleHistoryRef.current.reduce((a, b) => a + b, 0)
-    const avg = sum / angleHistoryRef.current.length
+    // // Calculate simple moving average
+    // const sum = angleHistoryRef.current.reduce((a, b) => a + b, 0)
+    // const avg = sum / angleHistoryRef.current.length
 
-    // Only update if change is significant
-    if (Math.abs(avg - filteredAngle) > ANGLE_THRESHOLD) {
-      setFilteredAngle(Math.floor(avg)) // Truncate decimals
-    }
+    // // Only update if change is significant
+    // if (Math.abs(avg - filteredAngle) > ANGLE_THRESHOLD) {
+    //   setFilteredAngle(Math.floor(avg)) // Truncate decimals
+    // }
+    setFilteredAngle(state.currentAngle);
   }, [state.currentAngle, state.mode])
 
   // Handle mode change
   const handleModeChange = (newMode: HapticMode) => {
     // Update stiffness based on mode
-    const newStiffness = newMode === "inertial-control" ? 0.3 : 
-                        newMode === "proportional-control" ? 0.8 : 
+    const newStiffness = newMode === "inertial-control" ? 0.25 : 
+                        newMode === "proportional-control" ? 0.4 : 
                         state.stiffness;
     
     updateState({
@@ -1177,6 +1193,16 @@ export function MiniTFDControl() {
               )}
             </button>
 
+            {/* Reset Device button */}
+            <button
+              className="btn btn-outline w-full mt-2"
+              onClick={reset}
+              disabled={!isConnected}
+            >
+              <RotateCw size={14} className="mr-2" />
+              Reset Device
+            </button>
+
             {error && (
               <div className="bg-red-900/30 border border-red-800 p-1 rounded text-xs text-red-400">{error}</div>
             )}
@@ -1291,11 +1317,11 @@ export function MiniTFDControl() {
 
         {/* Content container with vertical centering */}
         <div className="flex-1 flex flex-col items-center justify-center p-4">
-          {/* Dial Container - side by side layout */}
-          <div className="flex justify-center items-center gap-8" style={{ width: "100%", maxWidth: 900 }}>
+          {/* Dial Container - side by side layout with centered main dial */}
+          <div className="flex justify-center items-center" style={{ width: "100%", maxWidth: 1200 }}>
             {/* Torque Dial */}
-            <div className="flex-shrink-0" style={{ width: 400 }}>
-              <VelocityDial
+            <div className="flex-1 flex justify-end" style={{ width: 250, height: 100, marginRight: "20px" }}>
+              <TorqueDial
                 velocity={state.currentTorque}
                 isConnected={isConnected}
                 isDeviceResponding={isDeviceResponding}
@@ -1303,7 +1329,7 @@ export function MiniTFDControl() {
             </div>
 
             {/* Main Dial */}
-            <div className="flex-shrink-0" style={{ width: 400 }}>
+            <div className="shrink-0" style={{ width: 400 }}>
               {state.deviceType === "knob" ? (
                 <DialVisualization
                   mode={state.mode}
@@ -1330,8 +1356,18 @@ export function MiniTFDControl() {
                   isConnected={isConnected}
                   lastUpdate={lastAngleUpdate}
                   isDeviceResponding={isDeviceResponding}
+                  deviceType={state.deviceType}
                 />
               )}
+            </div>
+
+            {/* Velocity Dial */}
+            <div className="flex-1 flex justify-start" style={{ width: 250, height: 100, marginLeft: "20px" }}>
+              <VelocityDial
+                velocity={state.currentVelocity}
+                isConnected={isConnected}
+                isDeviceResponding={isDeviceResponding}
+              />
             </div>
           </div>
 
@@ -1339,7 +1375,7 @@ export function MiniTFDControl() {
           <div className="w-full max-w-2xl flex flex-col items-center mt-4">
             {state.mode === "increased-torque" && (
               <div className="form-control" style={{ maxWidth: 220, margin: "0 auto" }}>
-                <label className="form-label">Torque (0.0 - 1.0)</label>
+                <label className="form-label">Torque (0.0 - 2.0)</label>
                 <input
                   type="number"
                   className="form-input text-sm px-2 py-1"
@@ -1372,20 +1408,82 @@ export function MiniTFDControl() {
             )}
 
             {state.mode === "endstops" && (
-              <div className="form-control" style={{ maxWidth: 220, margin: "0 auto" }}>
-                <label className="form-label">Turns Lock-to-Lock</label>
-                <input
-                  type="number"
-                  className="form-input text-sm px-2 py-1"
-                  min="0.0"
-                  max="10"
-                  step="0.5"
-                  value={state.endstopTurns}
-                  onChange={(e) => updateState({ endstopTurns: Number.parseFloat(e.target.value) || 0.5 })}
-                  style={{ fontSize: "1rem", width: "100%" }}
-                />
-                <div className="text-xs text-gray-400 mt-1">
-                  Range: {state.endstopMinAngle.toFixed(0)}° to {state.endstopMaxAngle.toFixed(0)}°
+              <div className="flex flex-col space-y-4" style={{ maxWidth: 220, margin: "0 auto" }}>
+                <div className="form-control">
+                  <label className="form-label">Endstop Mode</label>
+                  <select
+                    className="form-select text-sm px-2 py-1"
+                    value={state.endstopMode}
+                    onChange={(e) => {
+                      const newMode = e.target.value as EndstopMode
+                      updateState({ endstopMode: newMode })
+                      if (isConnected && window.electronAPI) {
+                        sendTFDConfig()
+                      }
+                    }}
+                    style={{ fontSize: "1rem", width: "100%" }}
+                  >
+                    <option value="none">None</option>
+                    <option value="proportional">Proportional</option>
+                    <option value="soft">Soft Detents</option>
+                    <option value="medium">Medium Detents</option>
+                    <option value="rough">Rough Detents</option>
+                    <option value="center">Center Detent</option>
+                  </select>
+                </div>
+
+                <div className="form-control">
+                  <label className="form-label">Turns Lock-to-Lock</label>
+                  <input
+                    type="number"
+                    className="form-input text-sm px-2 py-1"
+                    min="0.0"
+                    max="10"
+                    step="0.5"
+                    value={state.endstopTurns}
+                    onChange={(e) => {
+                      const newTurns = Number.parseFloat(e.target.value) || 0.5
+                      updateState({ endstopTurns: newTurns })
+                      if (isConnected && window.electronAPI) {
+                        sendTFDConfig()
+                      }
+                    }}
+                    style={{ fontSize: "1rem", width: "100%" }}
+                  />
+                  <div className="text-xs text-gray-400 mt-1">
+                    Range: {state.endstopMinAngle.toFixed(0)}° to {state.endstopMaxAngle.toFixed(0)}°
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <button
+                    className={`tab relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
+                      state.isSticky ? "active" : ""
+                    }`}
+                    onClick={() => {
+                      const newSticky = !state.isSticky
+                      updateState({ isSticky: newSticky })
+                      if (isConnected && window.electronAPI) {
+                        window.electronAPI.serialWrite(`set sticky:${newSticky ? "on" : "off"}\n`)
+                      }
+                    }}
+                  >
+                  </button>
+
+                <button
+                  className="btn btn-outline btn-sm flex-1"
+                  onClick={() => {
+                    const newSticky = !state.isSticky
+                    updateState({ isSticky: newSticky })
+                    if (isConnected && window.electronAPI) {
+                      window.electronAPI.serialWrite(`set sticky:${newSticky ? "on" : "off"}\n`)
+                    }
+                  }}
+                  disabled={!state.isSticky}
+                  style={{ fontSize: "0.85rem", padding: "0.2rem 0" }}
+                >
+                  Sticky
+                </button>
                 </div>
               </div>
             )}
@@ -1442,8 +1540,10 @@ function DialVisualization({
 }: DialVisualizationProps) {
   // Helper to wrap angle to -180 to 180
   const wrap180 = (angle: number) => {
-    const a = ((((angle + 180) % 360) + 360) % 360) - 180
-    return a
+    while (angle <= -180.0) angle += 360.0;
+    while (angle > 180.0) angle -= 360.0;
+    const a = angle;
+    return a;
   }
 
   const getStrokeWidth = () => {
@@ -1491,51 +1591,33 @@ function DialVisualization({
 
   const displayAngle = getDisplayAngle()
 
-  const renderDetents = (count: number, style: "soft" | "medium" | "rough" | "center") => {
-    if (style === "center") {
-      const detentAngle = 0
-      const x1 = 200 + Math.cos(((detentAngle - 90) * Math.PI) / 180) * 180
-      const y1 = 200 + Math.sin(((detentAngle - 90) * Math.PI) / 180) * 180
-      const x2 = 200 + Math.cos(((detentAngle - 90) * Math.PI) / 180) * (180 - 20)
-      const y2 = 200 + Math.sin(((detentAngle - 90) * Math.PI) / 180) * (180 - 20)
-      return [
+  const renderDetents = (count: number, style: "soft" | "medium" | "rough" | "center" | "latch") => {
+    const detentElements = []
+    const angleStep = 360 / count
+    const strokeWidth = style === "latch" ? 3 : style === "rough" ? 2 : style === "medium" ? 1.5 : 1
+    const radius = style === "latch" ? 85 : style === "rough" ? 87 : style === "medium" ? 88 : 89
+
+    for (let i = 0; i < count; i++) {
+      const detentAngle = i * angleStep
+      const x1 = radius * Math.cos((detentAngle - 2) * (Math.PI / 180))
+      const y1 = radius * Math.sin((detentAngle - 2) * (Math.PI / 180))
+      const x2 = radius * Math.cos((detentAngle + 2) * (Math.PI / 180))
+      const y2 = radius * Math.sin((detentAngle + 2) * (Math.PI / 180))
+
+      detentElements.push(
         <line
-          key={"center-detent"}
+          key={`detent-${i}`}
           x1={x1}
           y1={y1}
           x2={x2}
           y2={y2}
-          stroke="currentColor"
-          strokeWidth={2}
-          opacity={0.8}
-        />,
-      ]
-    }
-    const detents = []
-    let spacing = 15,
-      width = 2
-    if (style === "rough") {
-      spacing = 36
-      width = 1
-    } else if (style === "medium") {
-      spacing = 18
-      width = 1
-    } else if (style === "soft") {
-      spacing = 2
-      width = 1
-    }
-    const detentCount = Math.round(360 / spacing)
-    for (let i = 0; i < detentCount; i++) {
-      const detentAngle = i * spacing
-      const x1 = 200 + Math.cos(((detentAngle - 90) * Math.PI) / 180) * 180
-      const y1 = 200 + Math.sin(((detentAngle - 90) * Math.PI) / 180) * 180
-      const x2 = 200 + Math.cos(((detentAngle - 90) * Math.PI) / 180) * (180 - 20)
-      const y2 = 200 + Math.sin(((detentAngle - 90) * Math.PI) / 180) * (180 - 20)
-      detents.push(
-        <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke="currentColor" strokeWidth={width} opacity={0.6} />,
+          stroke="white"
+          strokeWidth={strokeWidth}
+          strokeLinecap="round"
+        />
       )
     }
-    return detents
+    return detentElements
   }
 
   const renderEndstops = () => {
@@ -1607,14 +1689,15 @@ function DialVisualization({
     const targetX = 200 + Math.cos(((adjustedTargetAngle - 90) * Math.PI) / 180) * 160
     const targetY = 200 + Math.sin(((adjustedTargetAngle - 90) * Math.PI) / 180) * 160
 
-    return (
-      <g>
-        <circle cx={targetX} cy={targetY} r="12" fill="none" stroke="yellow" strokeWidth="3" opacity={0.8} />
-        <text x={targetX} y={targetY + 25} textAnchor="middle" fill="yellow" fontSize="10">
-          Target
-        </text>
-      </g>
-    )
+    // return (
+      // <g>
+      //   <circle cx={targetX} cy={targetY} r="12" fill="none" stroke="yellow" strokeWidth="3" opacity={0.8} />
+      //   <text x={targetX} y={targetY + 25} textAnchor="middle" fill="yellow" fontSize="10">
+      //     Target
+      //   </text>
+      // </g>
+    // )
+    return null
   }
 
   const renderReferenceMark = () => {
@@ -1644,6 +1727,7 @@ function DialVisualization({
       <svg
         viewBox="0 0 400 400"
         className="w-full h-full"
+        style={{ opacity: getDialOpacity() }}
       >
         <defs>
           <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
@@ -1653,10 +1737,11 @@ function DialVisualization({
 
         <circle cx="200" cy="200" r="180" fill="none" stroke={getDialColor()} strokeWidth={getStrokeWidth()} />
 
-        {mode === "soft-detents" && renderDetents(0, "soft")}
-        {mode === "medium-detents" && renderDetents(0, "medium")}
-        {mode === "rough-detents" && renderDetents(0, "rough")}
+        {mode === "soft-detents" && renderDetents(12, "soft")}
+        {mode === "medium-detents" && renderDetents(12, "medium")}
+        {mode === "rough-detents" && renderDetents(12, "rough")}
         {mode === "center-detent" && renderDetents(1, "center")}
+        {mode === "latch" && renderDetents(12, "latch")}
         {mode === "endstops" && renderEndstops()}
         {mode === "clockwise" && renderDirectionalArrow(true)}
         {mode === "counterclockwise" && renderDirectionalArrow(false)}
@@ -1719,6 +1804,7 @@ interface SteeringWheelVisualizationProps {
   isConnected: boolean
   lastUpdate: Date | null
   isDeviceResponding: boolean
+  deviceType: DeviceType
 }
 
 function SteeringWheelVisualization({
@@ -1732,9 +1818,13 @@ function SteeringWheelVisualization({
   isConnected,
   lastUpdate,
   isDeviceResponding,
+  deviceType,
 }: SteeringWheelVisualizationProps) {
   const wrap180 = (angle: number) => {
-    const a = ((((angle + 180) % 360) + 360) % 360) - 180
+    // const a = ((((angle + 180) % 360) + 360) % 360) - 180
+    while (angle <= -180.0) angle += 360.0;
+    while (angle > 180.0) angle -= 360.0;
+    const a = angle;
     return a
   }
 
@@ -1786,41 +1876,85 @@ function SteeringWheelVisualization({
 
   const displayAngle = getDisplayAngle()
 
-  const renderSteeringWheelSpokes = () => {
-    const spokeAngles = [0, 120, 240] // Three spokes at 120° intervals
-    return spokeAngles.map((spokeAngle, index) => {
-      const adjustedAngle = spokeAngle + displayAngle
-      const x1 = 200 + Math.cos(((adjustedAngle - 90) * Math.PI) / 180) * 60
-      const y1 = 200 + Math.sin(((adjustedAngle - 90) * Math.PI) / 180) * 60
-      const x2 = 200 + Math.cos(((adjustedAngle - 90) * Math.PI) / 180) * 160
-      const y2 = 200 + Math.sin(((adjustedAngle - 90) * Math.PI) / 180) * 160
-
-      return (
+  const renderDetents = (count: number, style: "soft" | "medium" | "rough" | "center") => {
+    if (style === "center") {
+      const detentAngle = 0
+      const x1 = 200 + Math.cos(((detentAngle - 90) * Math.PI) / 180) * 180
+      const y1 = 200 + Math.sin(((detentAngle - 90) * Math.PI) / 180) * 180
+      const x2 = 200 + Math.cos(((detentAngle - 90) * Math.PI) / 180) * (180 - 20)
+      const y2 = 200 + Math.sin(((detentAngle - 90) * Math.PI) / 180) * (180 - 20)
+      return [
         <line
-          key={index}
+          key={"center-detent"}
           x1={x1}
           y1={y1}
           x2={x2}
           y2={y2}
+          stroke="currentColor"
+          strokeWidth={2}
+          opacity={0.8}
+        />,
+      ]
+    }
+    const detents = []
+    let spacing = 15,
+      width = 2
+    if (style === "rough") {
+      spacing = 36
+      width = 1
+    } else if (style === "medium") {
+      spacing = 18
+      width = 1
+    } else if (style === "soft") {
+      spacing = 2
+      width = 1
+    }
+    const detentCount = Math.round(360 / spacing)
+    for (let i = 0; i < detentCount; i++) {
+      const detentAngle = i * spacing
+      const x1 = 200 + Math.cos(((detentAngle - 90) * Math.PI) / 180) * 180
+      const y1 = 200 + Math.sin(((detentAngle - 90) * Math.PI) / 180) * 180
+      const x2 = 200 + Math.cos(((detentAngle - 90) * Math.PI) / 180) * (180 - 20)
+      const y2 = 200 + Math.sin(((detentAngle - 90) * Math.PI) / 180) * (180 - 20)
+      detents.push(
+        <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke="currentColor" strokeWidth={width} opacity={0.6} />,
+      )
+    }
+    return detents
+  }
+
+  const renderSteeringWheelSpokes = () => {
+    const spokeAngles = [-90, 180, 90] // Three spokes at 90° intervals in the bottom half (relative to 180 deg)
+    const hubRadius = 60;
+    const rimRadius = 180;
+
+    return spokeAngles.map((spokeAngle, index) => {
+      const adjustedAngle = spokeAngle + displayAngle;
+      const startX = 200 + Math.cos(((adjustedAngle - 90) * Math.PI) / 180) * hubRadius;
+      const startY = 200 + Math.sin(((adjustedAngle - 90) * Math.PI) / 180) * hubRadius;
+      const endX = 200 + Math.cos(((adjustedAngle - 90) * Math.PI) / 180) * rimRadius;
+      const endY = 200 + Math.sin(((adjustedAngle - 90) * Math.PI) / 180) * rimRadius;
+
+      const strokeWidth = 7; // Standard stroke width for all spokes
+
+      return (
+        <line
+          key={index}
+          x1={startX}
+          y1={startY}
+          x2={endX}
+          y2={endY}
           stroke={getDialColor()}
-          strokeWidth="6"
+          strokeWidth={strokeWidth}
           strokeLinecap="round"
         />
-      )
-    })
-  }
+      );
+    });
+  };
 
   const renderSteeringWheelGrips = () => {
-    // Add grip indicators on the steering wheel rim
-    const gripPositions = [-30, 30] // Left and right grips relative to top
-    return gripPositions.map((gripAngle, index) => {
-      const adjustedAngle = gripAngle + displayAngle
-      const x = 200 + Math.cos(((adjustedAngle - 90) * Math.PI) / 180) * 170
-      const y = 200 + Math.sin(((adjustedAngle - 90) * Math.PI) / 180) * 170
-
-      return <circle key={index} cx={x} cy={y} r="8" fill={getDialColor()} opacity={0.8} />
-    })
-  }
+    return null; // Removed grips as per the new design
+  };
 
   const renderEndstops = () => {
     const wrapAngle = (angle: number) => {
@@ -1909,49 +2043,50 @@ function SteeringWheelVisualization({
       <svg
         viewBox="0 0 400 400"
         className="w-full h-full"
+        style={{ opacity: getDialOpacity() }}
       >
         {/* Outer steering wheel rim */}
         <circle cx="200" cy="200" r="180" fill="none" stroke={getDialColor()} strokeWidth={getStrokeWidth()} />
 
-        {/* Inner hub */}
-        <circle cx="200" cy="200" r="60" fill="none" stroke={getDialColor()} strokeWidth="4" />
+        {/* Inner hub - now a larger, slightly offset rectangle for the airbag/horn */}
+        {/* <rect x="150" y="170" width="100" height="60" rx="10" ry="10" fill="#333" stroke={getDialColor()} strokeWidth="3" /> */}
+        <circle cx="200" cy="200" r="60" fill={getDialColor()} /> {/* Inner circle for horn button */}
+        <circle cx="200" cy="200" r="50" fill="#111827" />
 
         {/* Steering wheel spokes */}
         {renderSteeringWheelSpokes()}
-
-        {/* Grip indicators */}
-        {renderSteeringWheelGrips()}
 
         {/* Mode-specific elements */}
         {mode === "endstops" && renderEndstops()}
         {mode === "inertial-control" && renderInertialIndicator()}
 
-        {/* Center hub */}
-        <circle cx="200" cy="200" r="15" fill={getDialColor()} />
-
-        {/* Top indicator (12 o'clock position) */}
-        <polygon points="200,20 190,40 210,40" fill={getDialColor()} stroke={getDialColor()} strokeWidth="2" />
+        {/* Top indicator (12 o'clock position) - now a simple line mark on the rim */}
+        {/* <line x1="200" y1="20" x2="200" y2="40" stroke={getDialColor()} strokeWidth="4" strokeLinecap="round" /> */}
 
         {/* Angle display */}
-        <text x="200" y="250" textAnchor="middle" fill={getDialColor()} fontSize="16" fontWeight="bold">
+        <text x="200" y="210" textAnchor="middle" fill={getDialColor()} fontSize="16" fontWeight="bold">
           {mode === "endstops" ? Math.round(angle) + "°" : Math.round(wrap180(angle)) + "°"}
         </text>
 
         {/* Connection status indicator */}
         {!isConnected && (
-          <text x="200" y="320" textAnchor="middle" fill="#6b7280" fontSize="14">
+          <text x="200" y="340" textAnchor="middle" fill="#6b7280" fontSize="14">
             Not Connected
           </text>
         )}
         {isConnected && !isDeviceResponding && (
-          <text x="200" y="320" textAnchor="middle" fill="#f59e0b" fontSize="14">
+          <text x="200" y="340" textAnchor="middle" fill="#f59e0b" fontSize="14">
             Device Not Responding
           </text>
         )}
 
+        {mode == "center-detent" && (
+          renderDetents(1, "center")
+        )}
+
         {/* Multi-turn indicator for endstops */}
         {mode === "endstops" && (
-          <text x="200" y="290" textAnchor="middle" fill={getDialColor()} fontSize="12">
+          <text x="200" y="320" textAnchor="middle" fill={getDialColor()} fontSize="12">
             {(angle / 360).toFixed(2)} turns
           </text>
         )}
@@ -1981,28 +2116,46 @@ function formatTFDCommand(config: TFDState): string {
     case "lock":
       return "set constant:1.0\n"
     case "endstops":
-      return `set endstops:${config.endstopTurns.toFixed(1)}\n`
+      switch (config.endstopMode) {
+        case "proportional":
+          return `set endstops-proportional:${config.endstopTurns.toFixed(1)}\n`
+        case "soft":
+          return `set endstops-ultra:${config.endstopTurns.toFixed(1)}\n`
+        case "medium":
+          return `set endstops-fine:${config.endstopTurns.toFixed(1)}\n`
+        case "rough":
+          return `set endstops-coarse:${config.endstopTurns.toFixed(1)}\n`
+        case "center":
+          return `set endstops-center:${config.endstopTurns.toFixed(1)}\n`
+        default:
+          return `set endstops:${config.endstopTurns.toFixed(1)}\n`
+      }
     case "center-detent":
       return "set detent:center\n"
     case "proportional-control":
       return `set proportional:${config.targetAngle.toFixed(1)},${config.stiffness.toFixed(1)}\n`
     case "inertial-control":
       return `set inertial:${config.stiffness.toFixed(1)}\n`
+    case "latch":
+      return "set latch\n"
     default:
       return "set normal\n"
   }
 }
 
 // Velocity Dial component (Speedometer) - Now displays Torque (0-1 Nm)
-interface VelocityDialProps {
+interface TorqueDialProps {
   velocity: number; // This prop will now be used for torque
   isConnected: boolean
   isDeviceResponding: boolean
 }
 
-function VelocityDial({ velocity: torqueValue, isConnected, isDeviceResponding }: VelocityDialProps) {
+function TorqueDial({ velocity: torqueValue, isConnected, isDeviceResponding }: TorqueDialProps) {
+  const getDialOpacity = () => {
+    return isConnected ? (isDeviceResponding ? 1 : 0.5) : 0.3
+  }
   // Scale torque input (0-1) to dial sweep angle
-  const maxInputTorque = 1.0;
+  const maxInputTorque = 2.0;
   const minInputTorque = 0.0;
 
   // Clamp the input torqueValue to the expected range (0 to 1) for display
@@ -2020,14 +2173,13 @@ function VelocityDial({ velocity: torqueValue, isConnected, isDeviceResponding }
 
   const dialColor = !isConnected ? "#6b7280" : !isDeviceResponding ? "#ef4444" : "#facc15";
 
-  const svgSize = 400; // Updated to match main dial size
+  const svgSize = 200
   const centerX = svgSize / 2;
   const centerY = svgSize / 2;
-  const radius = svgSize / 2 - 20; // Adjusted for larger size
+  const radius = svgSize / 2 - 10; // Adjusted for smaller size
 
   // Define the start and end points for the needle, offset from the center
-  // Increased needleInnerRadius to prevent overlap with text
-  const needleInnerRadius = radius * 0.5; // Increased from 0.5 to 0.7
+  const needleInnerRadius = radius * 0.4; 
   const needleOuterRadius = radius - 5;
 
   const needleStartX = centerX + Math.cos(((pointerAngle - 90) * Math.PI) / 180) * needleInnerRadius;
@@ -2041,57 +2193,162 @@ function VelocityDial({ velocity: torqueValue, isConnected, isDeviceResponding }
       height={svgSize}
       viewBox={`0 0 ${svgSize} ${svgSize}`}
       className="pointer-events-none"
-      style={{ opacity: isConnected ? 1 : 0.5 }}
+      style={{ opacity: getDialOpacity() }}
     >
       {/* Outer circle */}
-      <circle cx={centerX} cy={centerY} r={radius} fill="none" stroke={dialColor} strokeWidth="6" />
+      <circle cx={centerX} cy={centerY} r={radius} fill="none" stroke={dialColor} strokeWidth="4" />
 
       {/* Center circle */}
-      <circle cx={centerX} cy={centerY} r="6" fill={dialColor} />
+      <circle cx={centerX} cy={centerY} r="4" fill={dialColor} />
 
       {/* Needle */}
       <line
-        x1={needleStartX} // Use the calculated start point
-        y1={needleStartY} // Use the calculated start point
-        x2={needleEndX} // Use the calculated end point
-        y2={needleEndY} // Use the calculated end point
+        x1={needleStartX}
+        y1={needleStartY}
+        x2={needleEndX}
+        y2={needleEndY}
         stroke={dialColor}
-        strokeWidth="4"
+        strokeWidth="3" // Thinner needle for smaller dial
         strokeLinecap="round"
       />
 
       {/* Display torque value */}
-      <text x={centerX} y={centerY + 40} textAnchor="middle" fill={dialColor} fontSize="24" fontWeight="bold">
+      <text x={centerX} y={centerY + 15} textAnchor="middle" fill={dialColor} fontSize="14" fontWeight="bold">
         {clampedTorque.toFixed(2)} Nm
       </text>
 
       {/* Update dial labels to 0, 0.5, and 1.0 for Torque */}
       <text
         x={centerX + Math.cos(((startSweepAngle - 90) * Math.PI) / 180) * (radius + 30)}
-        y={centerY + Math.sin(((startSweepAngle - 90) * Math.PI) / 180) * (radius + 30)}
+        y={centerY + Math.sin(((startSweepAngle - 90) * Math.PI) / 180) * (radius + 5)}
         textAnchor="end"
         fill={dialColor}
-        fontSize="16"
+        fontSize="12"
       >
         0
       </text>
       <text
-        x={centerX + Math.cos(((0 - 90) * Math.PI) / 180) * (radius + 30)}
-        y={centerY + Math.sin(((0 - 90) * Math.PI) / 180) * (radius + 30)}
+        x={centerX + Math.cos(((0 - 90) * Math.PI) / 180) * (radius + 5)}
+        y={centerY + Math.sin(((0 - 90) * Math.PI) / 180) * (radius - 30)}
         textAnchor="middle"
         fill={dialColor}
-        fontSize="16"
+        fontSize="12"
       >
         0.5
       </text>
       <text
         x={centerX + Math.cos(((endSweepAngle - 90) * Math.PI) / 180) * (radius + 30)}
-        y={centerY + Math.sin(((endSweepAngle - 90) * Math.PI) / 180) * (radius + 30)}
+        y={centerY + Math.sin(((endSweepAngle - 90) * Math.PI) / 180) * (radius + 5)}
         textAnchor="start"
         fill={dialColor}
-        fontSize="16"
+        fontSize="12"
       >
         1.0
+      </text>
+    </svg>
+  );
+}
+
+// New Velocity Dial Component
+interface VelocityDialProps {
+  velocity: number;
+  isConnected: boolean;
+  isDeviceResponding: boolean;
+}
+
+function VelocityDial({ velocity, isConnected, isDeviceResponding }: VelocityDialProps) {
+  const getDialOpacity = () => {
+    return isConnected ? (isDeviceResponding ? 1 : 0.5) : 0.3
+  }
+  const maxVelocity = 200; // Max RPM
+  const minVelocity = -200;
+
+  // Clamp the input velocity to the expected range
+  const clamp = Math.max(minVelocity, Math.min(maxVelocity, velocity));
+  const clampedVelocity = Math.abs(clamp) <= 4 ? 0.0 : clamp;
+
+  const startSweepAngle = -135; // Same as TorqueDial
+  const endSweepAngle = 135;    // Same as TorqueDial
+  const totalSweepAngle = endSweepAngle - startSweepAngle;
+
+  // Normalize the clamped velocity from the 0-1000 range to the 0-1 scale for interpolation
+  const normalizedVelocity = (clampedVelocity - minVelocity) / (maxVelocity - minVelocity);
+
+  // Map the normalized velocity to the dial's sweep angle
+  const pointerAngle = startSweepAngle + normalizedVelocity * totalSweepAngle;
+
+  const dialColor = !isConnected ? "#6b7280" : !isDeviceResponding ? "#ef4444" : "#3b82f6"; // Blue for velocity
+
+  const svgSize = 200
+  const centerX = svgSize / 2;
+  const centerY = svgSize / 2;
+  const radius = svgSize / 2 - 10;
+
+  const needleInnerRadius = radius * 0.4;
+  const needleOuterRadius = radius - 5;
+
+  const needleStartX = centerX + Math.cos(((pointerAngle - 90) * Math.PI) / 180) * needleInnerRadius;
+  const needleStartY = centerY + Math.sin(((pointerAngle - 90) * Math.PI) / 180) * needleInnerRadius;
+  const needleEndX = centerX + Math.cos(((pointerAngle - 90) * Math.PI) / 180) * needleOuterRadius;
+  const needleEndY = centerY + Math.sin(((pointerAngle - 90) * Math.PI) / 180) * needleOuterRadius;
+
+  return (
+    <svg
+      width={svgSize}
+      height={svgSize}
+      viewBox={`0 0 ${svgSize} ${svgSize}`}
+      className="pointer-events-none"
+      style={{ opacity: getDialOpacity() }}
+    >
+      {/* Outer circle */}
+      <circle cx={centerX} cy={centerY} r={radius} fill="none" stroke={dialColor} strokeWidth="4" />
+
+      {/* Center circle */}
+      <circle cx={centerX} cy={centerY} r="4" fill={dialColor} />
+
+      {/* Needle */}
+      <line
+        x1={needleStartX}
+        y1={needleStartY}
+        x2={needleEndX}
+        y2={needleEndY}
+        stroke={dialColor}
+        strokeWidth="3" // Thinner needle for smaller dial
+        strokeLinecap="round"
+      />
+
+      {/* Display velocity value */}
+      <text x={centerX} y={centerY + 15} textAnchor="middle" fill={dialColor} fontSize="14" fontWeight="bold">
+        {clampedVelocity.toFixed(1)} RPM
+      </text>
+
+      {/* Dial labels: 0, 500, 1000 RPM */}
+      <text
+        x={centerX + Math.cos(((startSweepAngle - 90) * Math.PI) / 180) * (radius + 30)}
+        y={centerY + Math.sin(((startSweepAngle - 90) * Math.PI) / 180) * (radius + 5)}
+        textAnchor="end"
+        fill={dialColor}
+        fontSize="12"
+      >
+        -200
+      </text>
+      <text
+        x={centerX + Math.cos(((0 - 90) * Math.PI) / 180) * (radius + 5)}
+        y={centerY + Math.sin(((0 - 90) * Math.PI) / 180) * (radius - 30)}
+        textAnchor="middle"
+        fill={dialColor}
+        fontSize="12"
+      >
+        0
+      </text>
+      <text
+        x={centerX + Math.cos(((endSweepAngle - 90) * Math.PI) / 180) * (radius + 30)}
+        y={centerY + Math.sin(((endSweepAngle - 90) * Math.PI) / 180) * (radius + 5)}
+        textAnchor="start"
+        fill={dialColor}
+        fontSize="12"
+      >
+        200
       </text>
     </svg>
   );
