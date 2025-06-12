@@ -1,5 +1,7 @@
 "use client"
 import { useState, useEffect, useRef } from "react"
+import type React from "react"
+
 import {
   ArrowRight,
   Lock,
@@ -15,26 +17,24 @@ import {
   ArrowLeftCircle,
   Gauge,
   ChevronDown,
-  ChevronUp,
   Link2Icon,
 } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Switch } from "@radix-ui/react-switch";
 
 // Constants for product ID persistence
-const DEFAULT_PRODUCT_ID = "1002";
-const LAST_PRODUCT_ID_KEY = "lastConnectedProductId";
+const DEFAULT_PRODUCT_ID = "1002"
+const LAST_PRODUCT_ID_KEY = "lastConnectedProductId"
 
 // Helper functions for product ID persistence
 const getLastProductId = (): string => {
-  if (typeof window === 'undefined') return DEFAULT_PRODUCT_ID;
-  return localStorage.getItem(LAST_PRODUCT_ID_KEY) || DEFAULT_PRODUCT_ID;
-};
+  if (typeof window === "undefined") return DEFAULT_PRODUCT_ID
+  return localStorage.getItem(LAST_PRODUCT_ID_KEY) || DEFAULT_PRODUCT_ID
+}
 
 const setLastProductId = (productId: string) => {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(LAST_PRODUCT_ID_KEY, productId);
-};
+  if (typeof window === "undefined") return
+  localStorage.setItem(LAST_PRODUCT_ID_KEY, productId)
+}
 
 type HapticMode =
   | "none"
@@ -92,6 +92,7 @@ const hapticModes: { id: HapticMode; label: string; icon: any; devices: DeviceTy
   { id: "rough-detents", label: "Rough Detents", icon: Target, devices: ["knob"] },
   { id: "medium-detents", label: "Medium Detents", icon: Target, devices: ["knob"] },
   { id: "soft-detents", label: "Soft Detents", icon: Target, devices: ["knob"] },
+  { id: "latch", label: "Latch", icon: Link2Icon, devices: ["knob"] },
   { id: "clockwise", label: "Clockwise", icon: ArrowRightCircle, devices: ["knob"] },
   { id: "counterclockwise", label: "Counterclockwise", icon: ArrowLeftCircle, devices: ["knob"] },
   { id: "increased-torque", label: "Increased Torque", icon: Zap, devices: ["knob", "steering-wheel"] },
@@ -99,7 +100,6 @@ const hapticModes: { id: HapticMode; label: string; icon: any; devices: DeviceTy
   { id: "endstops", label: "Endstops", icon: ArrowRight, devices: ["knob", "steering-wheel"] },
   { id: "proportional-control", label: "Proportional Control", icon: Settings, devices: ["knob", "steering-wheel"] },
   { id: "inertial-control", label: "Inertial Control", icon: Gauge, devices: ["steering-wheel"] },
-  { id: "latch", label: "Latch", icon: Link2Icon, devices: ["knob"] },
 ]
 
 const baudRates = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600]
@@ -137,17 +137,15 @@ function CollapsibleSection({ title, children, defaultExpanded = true }: Collaps
 
   return (
     <div className="sidebar-group">
-      <div 
-        className={`sidebar-group-label ${!isExpanded ? 'collapsed' : ''}`}
+      <div
+        className={`sidebar-group-label ${!isExpanded ? "collapsed" : ""}`}
         onClick={() => setIsExpanded(!isExpanded)}
       >
         <span>{title}</span>
         <ChevronDown size={16} className="text-gray-400" />
       </div>
-      <div className={`collapsible-content ${isExpanded ? 'expanded' : 'collapsed'}`}>
-        <div className="p-1 space-y-2">
-          {children}
-        </div>
+      <div className={`collapsible-content ${isExpanded ? "expanded" : "collapsed"}`}>
+        <div className="p-1 space-y-2">{children}</div>
       </div>
     </div>
   )
@@ -239,15 +237,26 @@ export function MiniTFDControl() {
   }, [])
 
   // Update state helper
-  const updateState = (updates: Partial<TFDState>) => {
+  const updateState = (updates: Partial<TFDState>, callback?: () => void) => {
     setState((prev) => {
       const newState = { ...prev, ...updates }
+      
+      // Log state updates for endstop mode
+      if (updates.endstopMode !== undefined) {
+        console.log('State update - Previous endstop mode:', prev.endstopMode)
+        console.log('State update - New endstop mode:', updates.endstopMode)
+      }
 
       // Recalculate endstop angles when turns change
       if (updates.endstopTurns !== undefined) {
         const totalDegrees = updates.endstopTurns * 360
         newState.endstopMinAngle = -totalDegrees / 2
         newState.endstopMaxAngle = totalDegrees / 2
+      }
+
+      // Call the callback after state is updated
+      if (callback) {
+        setTimeout(callback, 0)
       }
 
       return newState
@@ -276,16 +285,16 @@ export function MiniTFDControl() {
         const ports = await window.electronAPI.serialListPorts()
         console.log("Found ports:", ports)
         setAvailablePorts(ports)
-        return ports; // Return ports for auto-connect
+        return ports // Return ports for auto-connect
       } else {
         setAvailablePorts([])
         setError("Serial communication not available in browser")
-        return [];
+        return []
       }
     } catch (err) {
       console.error("Failed to scan ports:", err)
       setError("Failed to scan for serial ports")
-      return [];
+      return []
     } finally {
       setIsScanning(false)
     }
@@ -294,142 +303,140 @@ export function MiniTFDControl() {
   // Auto-connect logic
   const handleAutoConnect = async () => {
     if (!isElectron || !window.electronAPI) {
-      setError("Serial communication not available in browser for auto-connect");
-      return;
+      setError("Serial communication not available in browser for auto-connect")
+      return
     }
-    if (isAutoConnecting) return;
+    if (isAutoConnecting) return
     if (isConnected) {
-      await disconnect();
+      await disconnect()
     }
 
-    setIsAutoConnecting(true);
-    setError(null);
-    setAvailablePorts([]);
-    updateState({ selectedPort: "" });
+    setIsAutoConnecting(true)
+    setError(null)
+    setAvailablePorts([])
+    updateState({ selectedPort: "" })
 
-    console.log("Starting auto-connect...");
+    console.log("Starting auto-connect...")
 
     try {
-      const ports = await listAvailablePorts();
+      const ports = await listAvailablePorts()
 
       if (ports.length === 0) {
-        setError("No serial ports found.");
-        setIsAutoConnecting(false);
-        return;
+        setError("No serial ports found.")
+        setIsAutoConnecting(false)
+        return
       }
 
       // Filter ports to only include those with a defined productId
-      const filteredPorts = ports.filter(port => port.productId !== undefined);
+      const filteredPorts = ports.filter((port) => port.productId !== undefined)
 
       if (filteredPorts.length === 0) {
-        setError("No compatible devices with Product ID found.");
-        setIsAutoConnecting(false);
-        return;
+        setError("No compatible devices with Product ID found.")
+        setIsAutoConnecting(false)
+        return
       }
 
       // Get the last connected productID
-      const lastProductId = getLastProductId();
-      console.log(`Looking for port with Product ID: ${lastProductId}`);
+      const lastProductId = getLastProductId()
+      console.log(`Looking for port with Product ID: ${lastProductId}`)
 
       // Try to find a port matching the last productID first
-      const preferredPort = filteredPorts.find(port => port.productId === lastProductId);
+      const preferredPort = filteredPorts.find((port) => port.productId === lastProductId)
 
       if (preferredPort) {
-        console.log(`Found preferred port: ${preferredPort.path} (Product ID: ${preferredPort.productId})`);
-        updateState({ selectedPort: preferredPort.path });
-        
+        console.log(`Found preferred port: ${preferredPort.path} (Product ID: ${preferredPort.productId})`)
+        updateState({ selectedPort: preferredPort.path })
+
         // Connect to the preferred port
-        await connect(preferredPort.path, state.baudRate);
-        setIsAutoConnecting(false);
-
+        await connect(preferredPort.path, state.baudRate)
+        setIsAutoConnecting(false)
       } else {
-        console.log(`Preferred port with Product ID ${lastProductId} not found.`);
+        console.log(`Preferred port with Product ID ${lastProductId} not found.`)
         // Do not connect, allow manual connection
-        setIsAutoConnecting(false);
+        setIsAutoConnecting(false)
       }
-
     } catch (err) {
-      console.error("Auto-connect process failed:", err);
-      setError("Auto-connect failed.");
-      setIsAutoConnecting(false);
+      console.error("Auto-connect process failed:", err)
+      setError("Auto-connect failed.")
+      setIsAutoConnecting(false)
     }
-  };
+  }
 
   // Add new function to check device responsiveness
   const checkDeviceResponsiveness = async (): Promise<boolean> => {
-    if (!isElectron || !window.electronAPI) return false;
-    
+    if (!isElectron || !window.electronAPI) return false
+
     try {
-      const result = await window.electronAPI.serialWrite("get all\n");
-      return result.success;
+      const result = await window.electronAPI.serialWrite("get all\n")
+      return result.success
     } catch (err) {
-      console.error("Error checking device responsiveness:", err);
-      return false;
+      console.error("Error checking device responsiveness:", err)
+      return false
     }
-  };
+  }
 
   // Add new function to handle reconnection
   const handleReconnection = async () => {
-    if (isReconnecting || reconnectAttempts >= 3 || !lastPortPath) return;
-    
-    console.log(`Attempting reconnection (attempt ${reconnectAttempts + 1}/3)...`);
-    setIsReconnecting(true);
-    
+    if (isReconnecting || reconnectAttempts >= 3 || !lastPortPath) return
+
+    console.log(`Attempting reconnection (attempt ${reconnectAttempts + 1}/3)...`)
+    setIsReconnecting(true)
+
     try {
       // First disconnect
       if (isElectron && window.electronAPI) {
-        await window.electronAPI.serialDisconnect();
+        await window.electronAPI.serialDisconnect()
       }
-      
+
       // Wait a bit before reconnecting
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+
       // Attempt to reconnect
       if (isElectron && window.electronAPI) {
-        const result = await window.electronAPI.serialConnect(lastPortPath, lastBaudRate);
+        const result = await window.electronAPI.serialConnect(lastPortPath, lastBaudRate)
         if (result.success) {
-          setIsConnected(true);
-          setIsInGracePeriod(true);
-          
+          setIsConnected(true)
+          setIsInGracePeriod(true)
+
           // Start grace period timer
           setTimeout(async () => {
-            setIsInGracePeriod(false);
-            const isResponding = await checkDeviceResponsiveness();
+            setIsInGracePeriod(false)
+            const isResponding = await checkDeviceResponsiveness()
             if (!isResponding) {
-              setReconnectAttempts(prev => prev + 1);
+              setReconnectAttempts((prev) => prev + 1)
               if (reconnectAttempts + 1 < 3) {
-                handleReconnection();
+                handleReconnection()
               } else {
-                setError("Device not responding after reconnection attempts");
-                setIsDeviceResponding(false);
+                setError("Device not responding after reconnection attempts")
+                setIsDeviceResponding(false)
               }
             } else {
-              setIsDeviceResponding(true);
-              setReconnectAttempts(0);
-              setHasAttemptedReconnect(false);
+              setIsDeviceResponding(true)
+              setReconnectAttempts(0)
+              setHasAttemptedReconnect(false)
             }
-          }, 2000); // 2 second grace period
+          }, 2000) // 2 second grace period
         } else {
-          throw new Error(result.error || "Reconnection failed");
+          throw new Error(result.error || "Reconnection failed")
         }
       }
     } catch (err) {
-      console.error("Reconnection failed:", err);
-      setReconnectAttempts(prev => prev + 1);
+      console.error("Reconnection failed:", err)
+      setReconnectAttempts((prev) => prev + 1)
       if (reconnectAttempts + 1 < 3) {
-        handleReconnection();
+        handleReconnection()
       } else {
-        setError("Failed to reconnect after multiple attempts");
+        setError("Failed to reconnect after multiple attempts")
       }
     } finally {
-      setIsReconnecting(false);
+      setIsReconnecting(false)
     }
-  };
+  }
 
   // Modify connect function to store last connection details
   const connect = async (portPath?: string, baudRate?: number) => {
-    const targetPort = portPath || state.selectedPort;
-    const targetBaudRate = baudRate || state.baudRate;
+    const targetPort = portPath || state.selectedPort
+    const targetBaudRate = baudRate || state.baudRate
 
     if (!targetPort) {
       setError("Please select a port first")
@@ -437,27 +444,27 @@ export function MiniTFDControl() {
     }
 
     // Store connection details for potential reconnection
-    setLastPortPath(targetPort);
-    setLastBaudRate(targetBaudRate);
-    setReconnectAttempts(0);
-    setHasAttemptedReconnect(false);
+    setLastPortPath(targetPort)
+    setLastBaudRate(targetBaudRate)
+    setReconnectAttempts(0)
+    setHasAttemptedReconnect(false)
 
     // Find and store the productID of the port we're connecting to
-    const port = availablePorts.find(p => p.path === targetPort);
+    const port = availablePorts.find((p) => p.path === targetPort)
     if (port?.productId) {
-      setLastProductId(port.productId);
-      console.log(`Storing product ID: ${port.productId}`);
+      setLastProductId(port.productId)
+      console.log(`Storing product ID: ${port.productId}`)
     }
 
-    setIsConnecting(true);
-    setError(null);
-    setIsDeviceResponding(false);
+    setIsConnecting(true)
+    setError(null)
+    setIsDeviceResponding(false)
     // Clear any existing device response timeout when starting a new connection attempt
     if (deviceResponseTimeoutRef.current) {
-      clearTimeout(deviceResponseTimeoutRef.current);
-      deviceResponseTimeoutRef.current = null;
+      clearTimeout(deviceResponseTimeoutRef.current)
+      deviceResponseTimeoutRef.current = null
     }
-    console.log(`Connecting to ${targetPort} at ${targetBaudRate} baud...`);
+    console.log(`Connecting to ${targetPort} at ${targetBaudRate} baud...`)
 
     try {
       if (isElectron && window.electronAPI) {
@@ -472,18 +479,18 @@ export function MiniTFDControl() {
             baudRate: targetBaudRate,
             timestamp: new Date().toISOString(),
           })
-          
+
           // Start grace period timer
           setTimeout(async () => {
-            setIsInGracePeriod(false);
-            const isResponding = await checkDeviceResponsiveness();
+            setIsInGracePeriod(false)
+            const isResponding = await checkDeviceResponsiveness()
             if (!isResponding) {
-              setError("Device not responding after connection");
-              setIsDeviceResponding(false);
+              setError("Device not responding after connection")
+              setIsDeviceResponding(false)
             } else {
-              setIsDeviceResponding(true);
+              setIsDeviceResponding(true)
             }
-          }, 2000); // 2 second grace period
+          }, 2000) // 2 second grace period
         } else {
           throw new Error(result.error || "Connection failed")
         }
@@ -583,22 +590,22 @@ export function MiniTFDControl() {
   const getCurrentTorque = async (): Promise<number | null> => {
     try {
       if (isElectron && window.electronAPI) {
-        const result = await window.electronAPI.serialWrite("get torque\n");
+        const result = await window.electronAPI.serialWrite("get torque\n")
         if (!result.success) {
-          setIsDeviceResponding(false);
-          setError("Device not responding to torque request");
-          throw new Error("Failed to request torque");
+          setIsDeviceResponding(false)
+          setError("Device not responding to torque request")
+          throw new Error("Failed to request torque")
         }
-        return null; // Data will be received via onSerialData
+        return null // Data will be received via onSerialData
       }
-      setIsDeviceResponding(false);
-      return null;
+      setIsDeviceResponding(false)
+      return null
     } catch (err) {
-      console.error("Failed to get current torque:", err);
-      setIsDeviceResponding(false);
-      return null;
+      console.error("Failed to get current torque:", err)
+      setIsDeviceResponding(false)
+      return null
     }
-  };
+  }
 
   // Start/stop angle polling
   const startPolling = () => {
@@ -849,110 +856,110 @@ export function MiniTFDControl() {
   // Set up event handlers for incoming serial data
   useEffect(() => {
     if (!isElectron || !window.electronAPI) {
-      console.log("Electron API not available");
+      console.log("Electron API not available")
       setIsDeviceResponding(false)
       return
     }
 
-    console.log("Setting up serial data handlers...");
+    console.log("Setting up serial data handlers...")
 
     const handleSerialData = (event: any, data: string) => {
-      console.log("Raw data received:", data); // Log raw data
+      // console.log("Raw data received:", data) // Log raw data
       const cleanData = data.trim()
-      console.log("Cleaned data:", cleanData); // Log cleaned data
+      // console.log("Cleaned data:", cleanData) // Log cleaned data
 
       // Check if the response looks like valid sensor data (combined format)
-      const isSensorData = cleanData.startsWith("ANGLE:") && cleanData.includes("VEL:") && cleanData.includes("TORQUE:");
-      const isCommandResponse = cleanData === "OK";
-      
-      console.log("Data type check:", { isSensorData, isCommandResponse }); // Log data type check
+      const isSensorData = cleanData.startsWith("ANGLE:") && cleanData.includes("VEL:") && cleanData.includes("TORQUE:")
+      const isCommandResponse = cleanData === "OK"
+
+      // console.log("Data type check:", { isSensorData, isCommandResponse }) // Log data type check
 
       if (isSensorData || isCommandResponse) {
-          setIsDeviceResponding(true);
-          setError(null);
+        setIsDeviceResponding(true)
+        setError(null)
 
-          // Reset the timeout whenever a valid response is received
-          if (deviceResponseTimeoutRef.current) {
-            clearTimeout(deviceResponseTimeoutRef.current);
+        // Reset the timeout whenever a valid response is received
+        if (deviceResponseTimeoutRef.current) {
+          clearTimeout(deviceResponseTimeoutRef.current)
+        }
+        deviceResponseTimeoutRef.current = setTimeout(() => {
+          console.log("Device response timeout.")
+          setIsDeviceResponding(false)
+          setError("Device stopped responding.")
+
+          // Trigger reconnection if we haven't already attempted it
+          if (!hasAttemptedReconnect && isConnected) {
+            setHasAttemptedReconnect(true)
+            handleReconnection()
           }
-          deviceResponseTimeoutRef.current = setTimeout(() => {
-            console.log("Device response timeout.");
-            setIsDeviceResponding(false);
-            setError("Device stopped responding.");
-            
-            // Trigger reconnection if we haven't already attempted it
-            if (!hasAttemptedReconnect && isConnected) {
-              setHasAttemptedReconnect(true);
-              handleReconnection();
-            }
-          }, 2000);
+        }, 2000)
       }
 
       if (isSensorData) {
         try {
-          console.log("Starting to parse sensor data..."); // Log start of parsing
-          
+          // console.log("Starting to parse sensor data...") // Log start of parsing
+
           // Parse the combined response format
-          const parts = cleanData.split(',');
-          console.log("Split parts:", parts); // Log split parts
-          
+          const parts = cleanData.split(",")
+          // console.log("Split parts:", parts) // Log split parts
+
           // Extract values using regex with proper error handling
-          const angleMatch = parts[0].match(/ANGLE:([-\d.]+)/);
-          const velMatch = parts[1].match(/VEL:([-\d.]+)/);
-          const torqueMatch = parts[2].match(/TORQUE:([-\d.]+)/);
-          
-          console.log("Regex matches:", { // Log regex matches
-            angleMatch,
-            velMatch,
-            torqueMatch
-          });
+          const angleMatch = parts[0].match(/ANGLE:([-\d.]+)/)
+          const velMatch = parts[1].match(/VEL:([-\d.]+)/)
+          const torqueMatch = parts[2].match(/TORQUE:([-\d.]+)/)
+
+          // console.log("Regex matches:", {
+            // Log regex matches
+            // angleMatch,
+            // velMatch,
+            // torqueMatch,
+          // })
 
           // Update angle if valid
           if (angleMatch && angleMatch[1]) {
-            const numericAngle = parseFloat(angleMatch[1]);
-            console.log("Parsed angle:", numericAngle); // Log parsed angle
+            const numericAngle = Number.parseFloat(angleMatch[1])
+            // console.log("Parsed angle:", numericAngle) // Log parsed angle
             if (!isNaN(numericAngle)) {
-              const clampedAngle = clampAngle(numericAngle);
-              updateState({ currentAngle: clampedAngle });
-              setLastAngleUpdate(new Date());
-              setPendingAngleRequest(false);
+              const clampedAngle = clampAngle(numericAngle)
+              updateState({ currentAngle: clampedAngle })
+              setLastAngleUpdate(new Date())
+              setPendingAngleRequest(false)
             } else {
-              console.warn("Invalid angle value:", angleMatch[1]);
+              console.warn("Invalid angle value:", angleMatch[1])
             }
           }
 
           // Update velocity if valid
           if (velMatch && velMatch[1]) {
-            const numericVelocity = parseFloat(velMatch[1]);
-            console.log("Parsed velocity:", numericVelocity); // Log parsed velocity
+            const numericVelocity = Number.parseFloat(velMatch[1])
+            // console.log("Parsed velocity:", numericVelocity) // Log parsed velocity
             if (!isNaN(numericVelocity)) {
-              updateState({ currentVelocity: numericVelocity });
-              setPendingVelocityRequest(false);
+              updateState({ currentVelocity: numericVelocity })
+              setPendingVelocityRequest(false)
             } else {
-              console.warn("Invalid velocity value:", velMatch[1]);
+              console.warn("Invalid velocity value:", velMatch[1])
             }
           }
 
           // Update torque if valid
           if (torqueMatch && torqueMatch[1]) {
-            const numericTorque = parseFloat(torqueMatch[1]);
-            console.log("Parsed torque:", numericTorque); // Log parsed torque
+            const numericTorque = Number.parseFloat(torqueMatch[1])
+            // console.log("Parsed torque:", numericTorque) // Log parsed torque
             if (!isNaN(numericTorque)) {
-              updateState({ currentTorque: numericTorque });
+              updateState({ currentTorque: numericTorque })
             } else {
-              console.warn("Invalid torque value:", torqueMatch[1]);
+              console.warn("Invalid torque value:", torqueMatch[1])
             }
           }
 
           // Log the parsed values for debugging
-          console.log("Final parsed values:", {
-            angle: angleMatch ? parseFloat(angleMatch[1]) : null,
-            velocity: velMatch ? parseFloat(velMatch[1]) : null,
-            torque: torqueMatch ? parseFloat(torqueMatch[1]) : null
-          });
-
+          // console.log("Final parsed values:", {
+          //   angle: angleMatch ? Number.parseFloat(angleMatch[1]) : null,
+          //   velocity: velMatch ? Number.parseFloat(velMatch[1]) : null,
+          //   torque: torqueMatch ? Number.parseFloat(torqueMatch[1]) : null,
+          // })
         } catch (err) {
-          console.error("Error parsing sensor data:", err, "Raw data:", cleanData);
+          console.error("Error parsing sensor data:", err, "Raw data:", cleanData)
         }
       }
 
@@ -979,14 +986,14 @@ export function MiniTFDControl() {
       }
     }
 
-    console.log("Registering serial event handlers...");
+    console.log("Registering serial event handlers...")
     const api = window.electronAPI as NonNullable<typeof window.electronAPI>
     api.onSerialData(handleSerialData)
     api.onSerialError(handleSerialError)
     api.onSerialDisconnected(handleSerialDisconnected)
 
     return () => {
-      console.log("Cleaning up serial event handlers...");
+      console.log("Cleaning up serial event handlers...")
       if (api.removeAllListeners) {
         api.removeAllListeners("serial-data")
         api.removeAllListeners("serial-error")
@@ -1023,25 +1030,24 @@ export function MiniTFDControl() {
     // if (Math.abs(avg - filteredAngle) > ANGLE_THRESHOLD) {
     //   setFilteredAngle(Math.floor(avg)) // Truncate decimals
     // }
-    setFilteredAngle(state.currentAngle);
+    setFilteredAngle(state.currentAngle)
   }, [state.currentAngle, state.mode])
 
   // Handle mode change
   const handleModeChange = (newMode: HapticMode) => {
     // Update stiffness based on mode
-    const newStiffness = newMode === "inertial-control" ? 0.25 : 
-                        newMode === "proportional-control" ? 0.4 : 
-                        state.stiffness;
-    
+    const newStiffness =
+      newMode === "inertial-control" ? 0.25 : newMode === "proportional-control" ? 0.4 : state.stiffness
+
     updateState({
       mode: newMode,
-      stiffness: newStiffness
-    });
+      stiffness: newStiffness,
+    })
   }
 
   // Update the mode selection handler to use the new function
   const handleModeSelect = (mode: HapticMode) => {
-    handleModeChange(mode);
+    handleModeChange(mode)
   }
 
   const availableModes = getAvailableModes(state.deviceType)
@@ -1064,27 +1070,28 @@ export function MiniTFDControl() {
                 {isElectron ? "" : " (Browser)"}
               </span>
             </div>
-            
+
             <div className="fixed-size-vertical-div"></div>
 
             {/* Custom Device Type Tabs */}
-            <div className="mt-4 flex bg-gray-800 rounded-lg p-1 gap-1">
+            <div className="mt-4 flex items-center">
               <button
-                className={`tab ${
-                  state.deviceType === "knob"
-                    ? "active"
-                    : ""
+                className={`tab flex items-center px-3 py-2 text-sm font-medium transition-colors relative ${
+                  state.deviceType === "knob" 
+                    ? "text-yellow-400 bg-gray-800/50 border-b-2 border-yellow-400" 
+                    : "text-gray-400 hover:text-yellow-400 hover:bg-gray-800/30"
                 }`}
                 onClick={() => handleDeviceTypeChange("knob")}
               >
                 <Settings className="w-4 h-4 mr-2" />
                 Knob
               </button>
+              <div className="h-4 w-px bg-gray-700 mx-2" />
               <button
-                className={`tab ${
-                  state.deviceType === "steering-wheel"
-                    ? "active"
-                    : ""
+                className={`tab flex items-center px-3 py-2 text-sm font-medium transition-colors relative ${
+                  state.deviceType === "steering-wheel" 
+                    ? "text-yellow-400 bg-gray-800/50 border-b-2 border-yellow-400" 
+                    : "text-gray-400 hover:text-yellow-400 hover:bg-gray-800/30"
                 }`}
                 onClick={() => handleDeviceTypeChange("steering-wheel")}
               >
@@ -1175,7 +1182,7 @@ export function MiniTFDControl() {
                 </>
               )}
             </button>
-            
+
             {/* Auto-connect button */}
             <button
               className="btn btn-outline w-full btn-sm"
@@ -1194,11 +1201,7 @@ export function MiniTFDControl() {
             </button>
 
             {/* Reset Device button */}
-            <button
-              className="btn btn-outline w-full mt-2"
-              onClick={reset}
-              disabled={!isConnected}
-            >
+            <button className="btn btn-outline w-full mt-2" onClick={reset} disabled={!isConnected}>
               <RotateCw size={14} className="mr-2" />
               Reset Device
             </button>
@@ -1226,7 +1229,7 @@ export function MiniTFDControl() {
                 className="form-input bg-gray-800 text-blue-400 font-mono text-center text-base px-1 py-1"
                 style={{ fontSize: "1rem", width: "100%", minWidth: 0, padding: "0.3rem 0.2rem" }}
               >
-                {Math.abs(state.currentVelocity) <= 4 ? '0.0' : state.currentVelocity.toFixed(1)} RPM
+                {Math.abs(state.currentVelocity) <= 4 ? "0.0" : state.currentVelocity.toFixed(1)} RPM
               </div>
             </div>
 
@@ -1236,7 +1239,7 @@ export function MiniTFDControl() {
                 className="form-input bg-gray-800 text-purple-400 font-mono text-center text-base px-1 py-1"
                 style={{ fontSize: "1rem", width: "100%", minWidth: 0, padding: "0.3rem 0.2rem" }}
               >
-                {(state.currentTorque).toFixed(2)} Nm
+                {state.currentTorque.toFixed(2)} Nm
               </div>
             </div>
 
@@ -1293,12 +1296,9 @@ export function MiniTFDControl() {
       </ScrollArea>
 
       {/* Main content */}
-      <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-auto">
+      <div className="flex-1 flex flex-col">
         {/* Header */}
-        <header
-          className="flex h-14 items-center gap-4 border-b border-gray-700 px-6 min-w-0 bg-gray-900 w-full"
-          style={{ paddingTop: "0.5rem", paddingBottom: "0.5rem" }}
-        >
+        <header className="flex h-14 items-center gap-4 border-b border-gray-700 px-6 min-w-0 bg-gray-900 w-full">
           <div className="badge badge-gray text-base" style={{ padding: "0.5rem 1rem", fontWeight: 600 }}>
             {hapticModes.find((m) => m.id === state.mode)?.label} -{" "}
             {state.deviceType === "knob" ? "Knob" : "Steering Wheel"}
@@ -1316,194 +1316,202 @@ export function MiniTFDControl() {
         </header>
 
         {/* Content container with vertical centering */}
-        <div className="flex-1 flex flex-col items-center justify-center p-4">
-          {/* Dial Container - side by side layout with centered main dial */}
-          <div className="flex justify-center items-center" style={{ width: "100%", maxWidth: 1200 }}>
-            {/* Torque Dial */}
-            <div className="flex-1 flex justify-end" style={{ width: 250, height: 100, marginRight: "20px" }}>
-              <TorqueDial
-                velocity={state.currentTorque}
-                isConnected={isConnected}
-                isDeviceResponding={isDeviceResponding}
-              />
-            </div>
-
-            {/* Main Dial */}
-            <div className="shrink-0" style={{ width: 400 }}>
-              {state.deviceType === "knob" ? (
-                <DialVisualization
-                  mode={state.mode}
-                  angle={filteredAngle}
-                  velocity={state.currentVelocity}
-                  torque={state.currentTorque}
-                  targetAngle={state.targetAngle}
-                  endstopMinAngle={state.endstopMinAngle}
-                  endstopMaxAngle={state.endstopMaxAngle}
+        <div className="flex-1 flex flex-col">
+          {/* Dial Container - centered in the available space */}
+          <div className="flex-1 flex items-center justify-center">
+            <div className="flex justify-center items-center" style={{ width: "100%", maxWidth: 1200 }}>
+              {/* Torque Dial */}
+              <div className="flex-1 flex justify-end" style={{ width: 250, height: 100, marginRight: "20px" }}>
+                <TorqueDial
+                  velocity={state.currentTorque}
                   isConnected={isConnected}
-                  lastUpdate={lastAngleUpdate}
                   isDeviceResponding={isDeviceResponding}
-                  deviceType="knob"
                 />
-              ) : (
-                <SteeringWheelVisualization
-                  mode={state.mode}
-                  angle={filteredAngle}
-                  velocity={state.currentVelocity}
-                  torque={state.currentTorque}
-                  targetAngle={state.targetAngle}
-                  endstopMinAngle={state.endstopMinAngle}
-                  endstopMaxAngle={state.endstopMaxAngle}
-                  isConnected={isConnected}
-                  lastUpdate={lastAngleUpdate}
-                  isDeviceResponding={isDeviceResponding}
-                  deviceType={state.deviceType}
-                />
-              )}
-            </div>
+              </div>
 
-            {/* Velocity Dial */}
-            <div className="flex-1 flex justify-start" style={{ width: 250, height: 100, marginLeft: "20px" }}>
-              <VelocityDial
-                velocity={state.currentVelocity}
-                isConnected={isConnected}
-                isDeviceResponding={isDeviceResponding}
-              />
+              {/* Main Dial */}
+              <div className="shrink-0" style={{ width: 400 }}>
+                {state.deviceType === "knob" ? (
+                  <DialVisualization
+                    mode={state.mode}
+                    angle={filteredAngle}
+                    velocity={state.currentVelocity}
+                    torque={state.currentTorque}
+                    targetAngle={state.targetAngle}
+                    endstopMinAngle={state.endstopMinAngle}
+                    endstopMaxAngle={state.endstopMaxAngle}
+                    isConnected={isConnected}
+                    lastUpdate={lastAngleUpdate}
+                    isDeviceResponding={isDeviceResponding}
+                    deviceType="knob"
+                  />
+                ) : (
+                  <SteeringWheelVisualization
+                    mode={state.mode}
+                    angle={filteredAngle}
+                    velocity={state.currentVelocity}
+                    torque={state.currentTorque}
+                    targetAngle={state.targetAngle}
+                    endstopMinAngle={state.endstopMinAngle}
+                    endstopMaxAngle={state.endstopMaxAngle}
+                    isConnected={isConnected}
+                    lastUpdate={lastAngleUpdate}
+                    isDeviceResponding={isDeviceResponding}
+                    deviceType={state.deviceType}
+                  />
+                )}
+              </div>
+
+              {/* Velocity Dial */}
+              <div className="flex-1 flex justify-start" style={{ width: 250, height: 100, marginLeft: "20px" }}>
+                <VelocityDial
+                  velocity={state.currentVelocity}
+                  isConnected={isConnected}
+                  isDeviceResponding={isDeviceResponding}
+                />
+              </div>
             </div>
           </div>
 
-          {/* Controls below dial */}
-          <div className="w-full max-w-2xl flex flex-col items-center mt-4">
-            {state.mode === "increased-torque" && (
-              <div className="form-control" style={{ maxWidth: 220, margin: "0 auto" }}>
-                <label className="form-label">Torque (0.0 - 2.0)</label>
-                <input
-                  type="number"
-                  className="form-input text-sm px-2 py-1"
-                  min="0"
-                  max="1"
-                  step="0.1"
-                  value={state.torque}
-                  onChange={(e) => updateState({ torque: Number.parseFloat(e.target.value) || 0 })}
-                  style={{ fontSize: "1rem", width: "100%" }}
-                />
-                <div className="text-xs text-gray-400 mt-1">Current: {state.torque.toFixed(1)}</div>
-              </div>
-            )}
+          {/* Controls container - fixed at bottom */}
+          <div className="w-full border-t border-gray-700 bg-gray-900 px-6 py-4">
+            <div className="max-w-4xl mx-auto flex items-center justify-center gap-8">
+              {state.mode === "endstops" && (
+                <>
+                  <div className="form-control flex-1 max-w-[220px] pb-[19px]">
+                    <label className="form-label">Endstop Mode</label>
+                    <select
+                      className="form-select text-sm px-2 py-1"
+                      value={state.endstopMode}
+                      onChange={(e) => {
+                        const newMode = e.target.value as EndstopMode
+                        console.log('ENDSTOP MODE SET: %s', newMode)
+                        updateState({ endstopMode: newMode })
+                        if (isConnected && window.electronAPI) {
+                          let command = ''
+                          switch (newMode) {
+                            case "proportional":
+                              command = `set endstops-proportional:${state.endstopTurns.toFixed(1)}\n`
+                              break
+                            case "soft":
+                              command = `set endstops-ultra:${state.endstopTurns.toFixed(1)}\n`
+                              break
+                            case "medium":
+                              command = `set endstops-fine:${state.endstopTurns.toFixed(1)}\n`
+                              break
+                            case "rough":
+                              command = `set endstops-coarse:${state.endstopTurns.toFixed(1)}\n`
+                              break
+                            case "center":
+                              command = `set endstops-center:${state.endstopTurns.toFixed(1)}\n`
+                              break
+                            default:
+                              command = `set endstops:${state.endstopTurns.toFixed(1)}\n`
+                          }
+                          console.log('Sending direct endstop command:', command)
+                          window.electronAPI.serialWrite(command)
+                        }
+                      }}
+                    >
+                      <option value="none">None</option>
+                      <option value="proportional">Proportional</option>
+                      <option value="soft">Soft Detents</option>
+                      <option value="medium">Medium Detents</option>
+                      <option value="rough">Rough Detents</option>
+                      <option value="center">Center Detent</option>
+                    </select>
+                  </div>
 
-            {state.mode === "proportional-control" && (
-              <div className="form-control" style={{ maxWidth: 220, margin: "0 auto" }}>
-                <label className="form-label">Stiffness</label>
-                <input
-                  type="number"
-                  className="form-input text-sm px-2 py-1"
-                  min="0"
-                  max="2"
-                  step="0.1"
-                  value={state.stiffness}
-                  onChange={(e) => updateState({ stiffness: Number.parseFloat(e.target.value) || 0 })}
-                  style={{ fontSize: "1rem", width: "100%" }}
-                />
-                <div className="text-xs text-gray-400 mt-1">Current: {state.stiffness.toFixed(1)}</div>
-              </div>
-            )}
+                  <div className="form-control flex-1 max-w-[220px]">
+                    <label className="form-label">Turns Lock-to-Lock</label>
+                    <input
+                      type="number"
+                      className="form-input text-sm px-2 py-1"
+                      min="0.0"
+                      max="10"
+                      step="0.5"
+                      value={state.endstopTurns}
+                      onChange={(e) => {
+                        const newTurns = Number.parseFloat(e.target.value) || 0.5
+                        updateState({ endstopTurns: newTurns })
+                        if (isConnected && window.electronAPI) {
+                          sendTFDConfig()
+                        }
+                      }}
+                    />
+                    <div className="text-xs text-gray-400 mt-1">
+                      Range: {state.endstopMinAngle.toFixed(0)}° to {state.endstopMaxAngle.toFixed(0)}°
+                    </div>
+                  </div>
 
-            {state.mode === "endstops" && (
-              <div className="flex flex-col space-y-4" style={{ maxWidth: 220, margin: "0 auto" }}>
-                <div className="form-control">
-                  <label className="form-label">Endstop Mode</label>
-                  <select
-                    className="form-select text-sm px-2 py-1"
-                    value={state.endstopMode}
-                    onChange={(e) => {
-                      const newMode = e.target.value as EndstopMode
-                      updateState({ endstopMode: newMode })
-                      if (isConnected && window.electronAPI) {
-                        sendTFDConfig()
-                      }
-                    }}
-                    style={{ fontSize: "1rem", width: "100%" }}
-                  >
-                    <option value="none">None</option>
-                    <option value="proportional">Proportional</option>
-                    <option value="soft">Soft Detents</option>
-                    <option value="medium">Medium Detents</option>
-                    <option value="rough">Rough Detents</option>
-                    <option value="center">Center Detent</option>
-                  </select>
-                </div>
+                  <div className="flex items-center gap-2 pb-[19px]">
+                    <label htmlFor="sticky-switch" className="form-label mb-0 whitespace-nowrap">
+                      Sticky Mode
+                    </label>
+                    <div
+                      className={`switch ${state.isSticky ? "active" : ""}`}
+                      onClick={() => {
+                        const newSticky = !state.isSticky
+                        updateState({ isSticky: newSticky })
+                        if (isConnected && window.electronAPI) {
+                          window.electronAPI.serialWrite(`set sticky:${newSticky ? "on" : "off"}\n`)
+                        }
+                      }}
+                    >
+                      <span className={`switch-toggle ${state.isSticky ? "active" : ""}`} />
+                    </div>
+                  </div>
+                </>
+              )}
 
-                <div className="form-control">
-                  <label className="form-label">Turns Lock-to-Lock</label>
+              {state.mode === "proportional-control" && (
+                <div className="form-control flex-1 max-w-[220px]">
+                  <label className="form-label">Stiffness</label>
                   <input
                     type="number"
                     className="form-input text-sm px-2 py-1"
-                    min="0.0"
-                    max="10"
-                    step="0.5"
-                    value={state.endstopTurns}
-                    onChange={(e) => {
-                      const newTurns = Number.parseFloat(e.target.value) || 0.5
-                      updateState({ endstopTurns: newTurns })
-                      if (isConnected && window.electronAPI) {
-                        sendTFDConfig()
-                      }
-                    }}
-                    style={{ fontSize: "1rem", width: "100%" }}
+                    min="0"
+                    max="2"
+                    step="0.1"
+                    value={state.stiffness}
+                    onChange={(e) => updateState({ stiffness: Number.parseFloat(e.target.value) || 0 })}
                   />
-                  <div className="text-xs text-gray-400 mt-1">
-                    Range: {state.endstopMinAngle.toFixed(0)}° to {state.endstopMaxAngle.toFixed(0)}°
-                  </div>
+                  <div className="text-xs text-gray-400 mt-1">Current: {state.stiffness.toFixed(1)}</div>
                 </div>
+              )}
 
-                <div className="flex items-center justify-between">
-                  <button
-                    className={`tab relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
-                      state.isSticky ? "active" : ""
-                    }`}
-                    onClick={() => {
-                      const newSticky = !state.isSticky
-                      updateState({ isSticky: newSticky })
-                      if (isConnected && window.electronAPI) {
-                        window.electronAPI.serialWrite(`set sticky:${newSticky ? "on" : "off"}\n`)
-                      }
-                    }}
-                  >
-                  </button>
-
-                <button
-                  className="btn btn-outline btn-sm flex-1"
-                  onClick={() => {
-                    const newSticky = !state.isSticky
-                    updateState({ isSticky: newSticky })
-                    if (isConnected && window.electronAPI) {
-                      window.electronAPI.serialWrite(`set sticky:${newSticky ? "on" : "off"}\n`)
-                    }
-                  }}
-                  disabled={!state.isSticky}
-                  style={{ fontSize: "0.85rem", padding: "0.2rem 0" }}
-                >
-                  Sticky
-                </button>
+              {state.mode === "increased-torque" && (
+                <div className="form-control flex-1 max-w-[220px]">
+                  <label className="form-label">Torque (0.0 - 2.0)</label>
+                  <input
+                    type="number"
+                    className="form-input text-sm px-2 py-1"
+                    min="0"
+                    max="1"
+                    step="0.1"
+                    value={state.torque}
+                    onChange={(e) => updateState({ torque: Number.parseFloat(e.target.value) || 0 })}
+                  />
+                  <div className="text-xs text-gray-400 mt-1">Current: {state.torque.toFixed(1)}</div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {state.mode === "inertial-control" && (
-              <div className="form-control" style={{ maxWidth: 220, margin: "0 auto" }}>
-                <label className="form-label">Inertia Factor</label>
-                <input
-                  type="number"
-                  className="form-input text-sm px-2 py-1"
-                  min="0"
-                  max="5"
-                  step="0.1"
-                  value={state.stiffness}
-                  onChange={(e) => updateState({ stiffness: Number.parseFloat(e.target.value) || 0 })}
-                  style={{ fontSize: "1rem", width: "100%" }}
-                />
-                <div className="text-xs text-gray-400 mt-1">Current: {state.stiffness.toFixed(1)}</div>
-              </div>
-            )}
+              {state.mode === "inertial-control" && (
+                <div className="form-control flex-1 max-w-[220px]">
+                  <label className="form-label">Inertia Factor</label>
+                  <input
+                    type="number"
+                    className="form-input text-sm px-2 py-1"
+                    min="0"
+                    max="5"
+                    step="0.1"
+                    value={state.stiffness}
+                    onChange={(e) => updateState({ stiffness: Number.parseFloat(e.target.value) || 0 })}
+                  />
+                  <div className="text-xs text-gray-400 mt-1">Current: {state.stiffness.toFixed(1)}</div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -1511,6 +1519,7 @@ export function MiniTFDControl() {
   )
 }
 
+// Rest of the component code remains the same...
 interface DialVisualizationProps {
   mode: HapticMode
   angle: number
@@ -1540,10 +1549,10 @@ function DialVisualization({
 }: DialVisualizationProps) {
   // Helper to wrap angle to -180 to 180
   const wrap180 = (angle: number) => {
-    while (angle <= -180.0) angle += 360.0;
-    while (angle > 180.0) angle -= 360.0;
-    const a = angle;
-    return a;
+    while (angle <= -180.0) angle += 360.0
+    while (angle > 180.0) angle -= 360.0
+    const a = angle
+    return a
   }
 
   const getStrokeWidth = () => {
@@ -1593,16 +1602,70 @@ function DialVisualization({
 
   const renderDetents = (count: number, style: "soft" | "medium" | "rough" | "center" | "latch") => {
     const detentElements = []
-    const angleStep = 360 / count
-    const strokeWidth = style === "latch" ? 3 : style === "rough" ? 2 : style === "medium" ? 1.5 : 1
-    const radius = style === "latch" ? 85 : style === "rough" ? 87 : style === "medium" ? 88 : 89
 
-    for (let i = 0; i < count; i++) {
-      const detentAngle = i * angleStep
-      const x1 = radius * Math.cos((detentAngle - 2) * (Math.PI / 180))
-      const y1 = radius * Math.sin((detentAngle - 2) * (Math.PI / 180))
-      const x2 = radius * Math.cos((detentAngle + 2) * (Math.PI / 180))
-      const y2 = radius * Math.sin((detentAngle + 2) * (Math.PI / 180))
+    // Define spacing in degrees for each detent type
+    let spacing: number
+    let strokeWidth: number
+
+    switch (style) {
+      case "soft":
+        spacing = 2 // Very fine control - 2 degrees apart
+        strokeWidth = 1
+        break
+      case "medium":
+        spacing = 15 // Medium control - 15 degrees apart
+        strokeWidth = 1.5
+        break
+      case "rough":
+        spacing = 36 // Coarse control - 36 degrees apart
+        strokeWidth = 2
+        break
+      case "center":
+        // Special case - single detent at 0 degrees
+        const angleRad = ((0 - 90) * Math.PI) / 180
+        const outerRadius = 180
+        const innerRadius = 160
+        const x1 = 200 + outerRadius * Math.cos(angleRad)
+        const y1 = 200 + outerRadius * Math.sin(angleRad)
+        const x2 = 200 + innerRadius * Math.cos(angleRad)
+        const y2 = 200 + innerRadius * Math.sin(angleRad)
+
+        return [
+          <line
+            key="center-detent"
+            x1={x1}
+            y1={y1}
+            x2={x2}
+            y2={y2}
+            stroke="white"
+            strokeWidth={3}
+            strokeLinecap="round"
+          />,
+        ]
+      case "latch":
+        spacing = 36 // Latch positions - 30 degrees apart (12 positions)
+        strokeWidth = 4 // Thicker for latch mode
+        break
+      default:
+        spacing = 15
+        strokeWidth = 1.5
+    }
+
+    // Calculate number of detents based on spacing
+    const detentCount = Math.round(360 / spacing)
+    const outerRadius = 180 // Match the main dial radius
+    const innerRadius = style === "latch" ? 160 : style === "rough" ? 165 : style === "medium" ? 170 : 175
+
+    for (let i = 0; i < detentCount; i++) {
+      const detentAngle = i * spacing
+      // Convert to radians and adjust for SVG coordinate system (0° at top)
+      const angleRad = ((detentAngle - 90) * Math.PI) / 180
+
+      // Calculate start and end points for radial tick marks
+      const x1 = 200 + outerRadius * Math.cos(angleRad)
+      const y1 = 200 + outerRadius * Math.sin(angleRad)
+      const x2 = 200 + innerRadius * Math.cos(angleRad)
+      const y2 = 200 + innerRadius * Math.sin(angleRad)
 
       detentElements.push(
         <line
@@ -1614,7 +1677,7 @@ function DialVisualization({
           stroke="white"
           strokeWidth={strokeWidth}
           strokeLinecap="round"
-        />
+        />,
       )
     }
     return detentElements
@@ -1689,14 +1752,6 @@ function DialVisualization({
     const targetX = 200 + Math.cos(((adjustedTargetAngle - 90) * Math.PI) / 180) * 160
     const targetY = 200 + Math.sin(((adjustedTargetAngle - 90) * Math.PI) / 180) * 160
 
-    // return (
-      // <g>
-      //   <circle cx={targetX} cy={targetY} r="12" fill="none" stroke="yellow" strokeWidth="3" opacity={0.8} />
-      //   <text x={targetX} y={targetY + 25} textAnchor="middle" fill="yellow" fontSize="10">
-      //     Target
-      //   </text>
-      // </g>
-    // )
     return null
   }
 
@@ -1724,11 +1779,7 @@ function DialVisualization({
 
   return (
     <div className="relative w-[400px] h-[400px]">
-      <svg
-        viewBox="0 0 400 400"
-        className="w-full h-full"
-        style={{ opacity: getDialOpacity() }}
-      >
+      <svg viewBox="0 0 400 400" className="w-full h-full" style={{ opacity: getDialOpacity() }}>
         <defs>
           <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
             <polygon points="0 0, 10 3.5, 0 7" fill="currentColor" />
@@ -1821,10 +1872,9 @@ function SteeringWheelVisualization({
   deviceType,
 }: SteeringWheelVisualizationProps) {
   const wrap180 = (angle: number) => {
-    // const a = ((((angle + 180) % 360) + 360) % 360) - 180
-    while (angle <= -180.0) angle += 360.0;
-    while (angle > 180.0) angle -= 360.0;
-    const a = angle;
+    while (angle <= -180.0) angle += 360.0
+    while (angle > 180.0) angle -= 360.0
+    const a = angle
     return a
   }
 
@@ -1879,45 +1929,67 @@ function SteeringWheelVisualization({
   const renderDetents = (count: number, style: "soft" | "medium" | "rough" | "center") => {
     if (style === "center") {
       const detentAngle = 0
-      const x1 = 200 + Math.cos(((detentAngle - 90) * Math.PI) / 180) * 180
-      const y1 = 200 + Math.sin(((detentAngle - 90) * Math.PI) / 180) * 180
-      const x2 = 200 + Math.cos(((detentAngle - 90) * Math.PI) / 180) * (180 - 20)
-      const y2 = 200 + Math.sin(((detentAngle - 90) * Math.PI) / 180) * (180 - 20)
+      const angleRad = ((detentAngle - 90) * Math.PI) / 180
+      const outerRadius = 180
+      const innerRadius = 160
+
+      const x1 = 200 + outerRadius * Math.cos(angleRad)
+      const y1 = 200 + outerRadius * Math.sin(angleRad)
+      const x2 = 200 + innerRadius * Math.cos(angleRad)
+      const y2 = 200 + innerRadius * Math.sin(angleRad)
+
       return [
         <line
-          key={"center-detent"}
+          key="center-detent"
           x1={x1}
           y1={y1}
           x2={x2}
           y2={y2}
           stroke="currentColor"
-          strokeWidth={2}
-          opacity={0.8}
+          strokeWidth={3}
+          strokeLinecap="round"
         />,
       ]
     }
-    const detents = []
-    let spacing = 15,
-      width = 2
-    if (style === "rough") {
-      spacing = 36
-      width = 1
-    } else if (style === "medium") {
-      spacing = 18
-      width = 1
-    } else if (style === "soft") {
-      spacing = 2
-      width = 1
+
+    // Define spacing in degrees for each detent type
+    let spacing: number
+    let strokeWidth: number
+
+    switch (style) {
+      case "soft":
+        spacing = 2 // Very fine control - 2 degrees apart
+        strokeWidth = 1
+        break
+      case "medium":
+        spacing = 15 // Medium control - 15 degrees apart
+        strokeWidth = 1.5
+        break
+      case "rough":
+        spacing = 36 // Coarse control - 36 degrees apart
+        strokeWidth = 2
+        break
+      default:
+        spacing = 15
+        strokeWidth = 1.5
     }
+
+    const detents = []
     const detentCount = Math.round(360 / spacing)
+    const outerRadius = 180
+    const innerRadius = 165
+
     for (let i = 0; i < detentCount; i++) {
       const detentAngle = i * spacing
-      const x1 = 200 + Math.cos(((detentAngle - 90) * Math.PI) / 180) * 180
-      const y1 = 200 + Math.sin(((detentAngle - 90) * Math.PI) / 180) * 180
-      const x2 = 200 + Math.cos(((detentAngle - 90) * Math.PI) / 180) * (180 - 20)
-      const y2 = 200 + Math.sin(((detentAngle - 90) * Math.PI) / 180) * (180 - 20)
+      const angleRad = ((detentAngle - 90) * Math.PI) / 180
+
+      const x1 = 200 + outerRadius * Math.cos(angleRad)
+      const y1 = 200 + outerRadius * Math.sin(angleRad)
+      const x2 = 200 + innerRadius * Math.cos(angleRad)
+      const y2 = 200 + innerRadius * Math.sin(angleRad)
+
       detents.push(
-        <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke="currentColor" strokeWidth={width} opacity={0.6} />,
+        <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke="currentColor" strokeWidth={strokeWidth} opacity={0.6} />,
       )
     }
     return detents
@@ -1925,17 +1997,17 @@ function SteeringWheelVisualization({
 
   const renderSteeringWheelSpokes = () => {
     const spokeAngles = [-90, 180, 90] // Three spokes at 90° intervals in the bottom half (relative to 180 deg)
-    const hubRadius = 60;
-    const rimRadius = 180;
+    const hubRadius = 60
+    const rimRadius = 180
 
     return spokeAngles.map((spokeAngle, index) => {
-      const adjustedAngle = spokeAngle + displayAngle;
-      const startX = 200 + Math.cos(((adjustedAngle - 90) * Math.PI) / 180) * hubRadius;
-      const startY = 200 + Math.sin(((adjustedAngle - 90) * Math.PI) / 180) * hubRadius;
-      const endX = 200 + Math.cos(((adjustedAngle - 90) * Math.PI) / 180) * rimRadius;
-      const endY = 200 + Math.sin(((adjustedAngle - 90) * Math.PI) / 180) * rimRadius;
+      const adjustedAngle = spokeAngle + displayAngle
+      const startX = 200 + Math.cos(((adjustedAngle - 90) * Math.PI) / 180) * hubRadius
+      const startY = 200 + Math.sin(((adjustedAngle - 90) * Math.PI) / 180) * hubRadius
+      const endX = 200 + Math.cos(((adjustedAngle - 90) * Math.PI) / 180) * rimRadius
+      const endY = 200 + Math.sin(((adjustedAngle - 90) * Math.PI) / 180) * rimRadius
 
-      const strokeWidth = 7; // Standard stroke width for all spokes
+      const strokeWidth = 7 // Standard stroke width for all spokes
 
       return (
         <line
@@ -1948,13 +2020,13 @@ function SteeringWheelVisualization({
           strokeWidth={strokeWidth}
           strokeLinecap="round"
         />
-      );
-    });
-  };
+      )
+    })
+  }
 
   const renderSteeringWheelGrips = () => {
-    return null; // Removed grips as per the new design
-  };
+    return null // Removed grips as per the new design
+  }
 
   const renderEndstops = () => {
     const wrapAngle = (angle: number) => {
@@ -2040,34 +2112,24 @@ function SteeringWheelVisualization({
 
   return (
     <div className="relative w-[400px] h-[400px]">
-      <svg
-        viewBox="0 0 400 400"
-        className="w-full h-full"
-        style={{ opacity: getDialOpacity() }}
-      >
+      <svg viewBox="0 0 400 400" className="w-full h-full" style={{ opacity: getDialOpacity() }}>
         {/* Outer steering wheel rim */}
         <circle cx="200" cy="200" r="180" fill="none" stroke={getDialColor()} strokeWidth={getStrokeWidth()} />
-
         {/* Inner hub - now a larger, slightly offset rectangle for the airbag/horn */}
         {/* <rect x="150" y="170" width="100" height="60" rx="10" ry="10" fill="#333" stroke={getDialColor()} strokeWidth="3" /> */}
         <circle cx="200" cy="200" r="60" fill={getDialColor()} /> {/* Inner circle for horn button */}
         <circle cx="200" cy="200" r="50" fill="#111827" />
-
         {/* Steering wheel spokes */}
         {renderSteeringWheelSpokes()}
-
         {/* Mode-specific elements */}
         {mode === "endstops" && renderEndstops()}
         {mode === "inertial-control" && renderInertialIndicator()}
-
         {/* Top indicator (12 o'clock position) - now a simple line mark on the rim */}
         {/* <line x1="200" y1="20" x2="200" y2="40" stroke={getDialColor()} strokeWidth="4" strokeLinecap="round" /> */}
-
         {/* Angle display */}
         <text x="200" y="210" textAnchor="middle" fill={getDialColor()} fontSize="16" fontWeight="bold">
           {mode === "endstops" ? Math.round(angle) + "°" : Math.round(wrap180(angle)) + "°"}
         </text>
-
         {/* Connection status indicator */}
         {!isConnected && (
           <text x="200" y="340" textAnchor="middle" fill="#6b7280" fontSize="14">
@@ -2079,11 +2141,7 @@ function SteeringWheelVisualization({
             Device Not Responding
           </text>
         )}
-
-        {mode == "center-detent" && (
-          renderDetents(1, "center")
-        )}
-
+        {mode == "center-detent" && renderDetents(1, "center")}
         {/* Multi-turn indicator for endstops */}
         {mode === "endstops" && (
           <text x="200" y="320" textAnchor="middle" fill={getDialColor()} fontSize="12">
@@ -2098,6 +2156,12 @@ function SteeringWheelVisualization({
 
 // Helper function to format haptic commands using your protocol
 function formatTFDCommand(config: TFDState): string {
+  console.log('Formatting TFD command - Current state:', {
+    mode: config.mode,
+    endstopMode: config.endstopMode,
+    endstopTurns: config.endstopTurns
+  })
+
   switch (config.mode) {
     case "none":
       return "set normal\n"
@@ -2116,19 +2180,32 @@ function formatTFDCommand(config: TFDState): string {
     case "lock":
       return "set constant:1.0\n"
     case "endstops":
+      console.log('Generating endstop command for mode:', config.endstopMode)
       switch (config.endstopMode) {
         case "proportional":
-          return `set endstops-proportional:${config.endstopTurns.toFixed(1)}\n`
+          const propCmd = `set endstops-proportional:${config.endstopTurns.toFixed(1)}\n`
+          console.log('Generated proportional command:', propCmd)
+          return propCmd
         case "soft":
-          return `set endstops-ultra:${config.endstopTurns.toFixed(1)}\n`
+          const softCmd = `set endstops-ultra:${config.endstopTurns.toFixed(1)}\n`
+          console.log('Generated soft command:', softCmd)
+          return softCmd
         case "medium":
-          return `set endstops-fine:${config.endstopTurns.toFixed(1)}\n`
+          const mediumCmd = `set endstops-fine:${config.endstopTurns.toFixed(1)}\n`
+          console.log('Generated medium command:', mediumCmd)
+          return mediumCmd
         case "rough":
-          return `set endstops-coarse:${config.endstopTurns.toFixed(1)}\n`
+          const roughCmd = `set endstops-coarse:${config.endstopTurns.toFixed(1)}\n`
+          console.log('Generated rough command:', roughCmd)
+          return roughCmd
         case "center":
-          return `set endstops-center:${config.endstopTurns.toFixed(1)}\n`
+          const centerCmd = `set endstops-center:${config.endstopTurns.toFixed(1)}\n`
+          console.log('Generated center command:', centerCmd)
+          return centerCmd
         default:
-          return `set endstops:${config.endstopTurns.toFixed(1)}\n`
+          const defaultCmd = `set endstops:${config.endstopTurns.toFixed(1)}\n`
+          console.log('Generated default command:', defaultCmd)
+          return defaultCmd
       }
     case "center-detent":
       return "set detent:center\n"
@@ -2145,7 +2222,7 @@ function formatTFDCommand(config: TFDState): string {
 
 // Velocity Dial component (Speedometer) - Now displays Torque (0-1 Nm)
 interface TorqueDialProps {
-  velocity: number; // This prop will now be used for torque
+  velocity: number // This prop will now be used for torque
   isConnected: boolean
   isDeviceResponding: boolean
 }
@@ -2155,37 +2232,37 @@ function TorqueDial({ velocity: torqueValue, isConnected, isDeviceResponding }: 
     return isConnected ? (isDeviceResponding ? 1 : 0.5) : 0.3
   }
   // Scale torque input (0-1) to dial sweep angle
-  const maxInputTorque = 2.0;
-  const minInputTorque = 0.0;
+  const maxInputTorque = 2.0
+  const minInputTorque = 0.0
 
   // Clamp the input torqueValue to the expected range (0 to 1) for display
-  const clampedTorque = Math.max(minInputTorque, Math.min(maxInputTorque, torqueValue));
+  const clampedTorque = Math.max(minInputTorque, Math.min(maxInputTorque, torqueValue))
 
-  const startSweepAngle = -135;
-  const endSweepAngle = 135;
-  const totalSweepAngle = endSweepAngle - startSweepAngle;
+  const startSweepAngle = -135
+  const endSweepAngle = 135
+  const totalSweepAngle = endSweepAngle - startSweepAngle
 
   // Normalize the clamped torque from the 0-1 range to the 0-1 scale for interpolation
-  const normalizedTorque = (clampedTorque - minInputTorque) / (maxInputTorque - minInputTorque);
+  const normalizedTorque = (clampedTorque - minInputTorque) / (maxInputTorque - minInputTorque)
 
   // Map the normalized torque to the dial's sweep angle
-  const pointerAngle = startSweepAngle + normalizedTorque * totalSweepAngle;
+  const pointerAngle = startSweepAngle + normalizedTorque * totalSweepAngle
 
-  const dialColor = !isConnected ? "#6b7280" : !isDeviceResponding ? "#ef4444" : "#facc15";
+  const dialColor = !isConnected ? "#6b7280" : !isDeviceResponding ? "#ef4444" : "#facc15"
 
   const svgSize = 200
-  const centerX = svgSize / 2;
-  const centerY = svgSize / 2;
-  const radius = svgSize / 2 - 10; // Adjusted for smaller size
+  const centerX = svgSize / 2
+  const centerY = svgSize / 2
+  const radius = svgSize / 2 - 10 // Adjusted for smaller size
 
   // Define the start and end points for the needle, offset from the center
-  const needleInnerRadius = radius * 0.4; 
-  const needleOuterRadius = radius - 5;
+  const needleInnerRadius = radius * 0.4
+  const needleOuterRadius = radius - 5
 
-  const needleStartX = centerX + Math.cos(((pointerAngle - 90) * Math.PI) / 180) * needleInnerRadius;
-  const needleStartY = centerY + Math.sin(((pointerAngle - 90) * Math.PI) / 180) * needleInnerRadius;
-  const needleEndX = centerX + Math.cos(((pointerAngle - 90) * Math.PI) / 180) * needleOuterRadius;
-  const needleEndY = centerY + Math.sin(((pointerAngle - 90) * Math.PI) / 180) * needleOuterRadius;
+  const needleStartX = centerX + Math.cos(((pointerAngle - 90) * Math.PI) / 180) * needleInnerRadius
+  const needleStartY = centerY + Math.sin(((pointerAngle - 90) * Math.PI) / 180) * needleInnerRadius
+  const needleEndX = centerX + Math.cos(((pointerAngle - 90) * Math.PI) / 180) * needleOuterRadius
+  const needleEndY = centerY + Math.sin(((pointerAngle - 90) * Math.PI) / 180) * needleOuterRadius
 
   return (
     <svg
@@ -2234,7 +2311,7 @@ function TorqueDial({ velocity: torqueValue, isConnected, isDeviceResponding }: 
         fill={dialColor}
         fontSize="12"
       >
-        0.5
+        1.0
       </text>
       <text
         x={centerX + Math.cos(((endSweepAngle - 90) * Math.PI) / 180) * (radius + 30)}
@@ -2243,54 +2320,54 @@ function TorqueDial({ velocity: torqueValue, isConnected, isDeviceResponding }: 
         fill={dialColor}
         fontSize="12"
       >
-        1.0
+        2.0
       </text>
     </svg>
-  );
+  )
 }
 
 // New Velocity Dial Component
 interface VelocityDialProps {
-  velocity: number;
-  isConnected: boolean;
-  isDeviceResponding: boolean;
+  velocity: number
+  isConnected: boolean
+  isDeviceResponding: boolean
 }
 
 function VelocityDial({ velocity, isConnected, isDeviceResponding }: VelocityDialProps) {
   const getDialOpacity = () => {
     return isConnected ? (isDeviceResponding ? 1 : 0.5) : 0.3
   }
-  const maxVelocity = 200; // Max RPM
-  const minVelocity = -200;
+  const maxVelocity = 200 // Max RPM
+  const minVelocity = -200
 
   // Clamp the input velocity to the expected range
-  const clamp = Math.max(minVelocity, Math.min(maxVelocity, velocity));
-  const clampedVelocity = Math.abs(clamp) <= 4 ? 0.0 : clamp;
+  const clamp = Math.max(minVelocity, Math.min(maxVelocity, velocity))
+  const clampedVelocity = Math.abs(clamp) <= 4 ? 0.0 : clamp
 
-  const startSweepAngle = -135; // Same as TorqueDial
-  const endSweepAngle = 135;    // Same as TorqueDial
-  const totalSweepAngle = endSweepAngle - startSweepAngle;
+  const startSweepAngle = -135 // Same as TorqueDial
+  const endSweepAngle = 135 // Same as TorqueDial
+  const totalSweepAngle = endSweepAngle - startSweepAngle
 
   // Normalize the clamped velocity from the 0-1000 range to the 0-1 scale for interpolation
-  const normalizedVelocity = (clampedVelocity - minVelocity) / (maxVelocity - minVelocity);
+  const normalizedVelocity = (clampedVelocity - minVelocity) / (maxVelocity - minVelocity)
 
   // Map the normalized velocity to the dial's sweep angle
-  const pointerAngle = startSweepAngle + normalizedVelocity * totalSweepAngle;
+  const pointerAngle = startSweepAngle + normalizedVelocity * totalSweepAngle
 
-  const dialColor = !isConnected ? "#6b7280" : !isDeviceResponding ? "#ef4444" : "#3b82f6"; // Blue for velocity
+  const dialColor = !isConnected ? "#6b7280" : !isDeviceResponding ? "#ef4444" : "#3b82f6" // Blue for velocity
 
   const svgSize = 200
-  const centerX = svgSize / 2;
-  const centerY = svgSize / 2;
-  const radius = svgSize / 2 - 10;
+  const centerX = svgSize / 2
+  const centerY = svgSize / 2
+  const radius = svgSize / 2 - 10
 
-  const needleInnerRadius = radius * 0.4;
-  const needleOuterRadius = radius - 5;
+  const needleInnerRadius = radius * 0.4
+  const needleOuterRadius = radius - 5
 
-  const needleStartX = centerX + Math.cos(((pointerAngle - 90) * Math.PI) / 180) * needleInnerRadius;
-  const needleStartY = centerY + Math.sin(((pointerAngle - 90) * Math.PI) / 180) * needleInnerRadius;
-  const needleEndX = centerX + Math.cos(((pointerAngle - 90) * Math.PI) / 180) * needleOuterRadius;
-  const needleEndY = centerY + Math.sin(((pointerAngle - 90) * Math.PI) / 180) * needleOuterRadius;
+  const needleStartX = centerX + Math.cos(((pointerAngle - 90) * Math.PI) / 180) * needleInnerRadius
+  const needleStartY = centerY + Math.sin(((pointerAngle - 90) * Math.PI) / 180) * needleInnerRadius
+  const needleEndX = centerX + Math.cos(((pointerAngle - 90) * Math.PI) / 180) * needleOuterRadius
+  const needleEndY = centerY + Math.sin(((pointerAngle - 90) * Math.PI) / 180) * needleOuterRadius
 
   return (
     <svg
@@ -2351,5 +2428,5 @@ function VelocityDial({ velocity, isConnected, isDeviceResponding }: VelocityDia
         200
       </text>
     </svg>
-  );
+  )
 }
